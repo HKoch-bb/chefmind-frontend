@@ -29,6 +29,7 @@ import PauseIcon from "@mui/icons-material/Pause";
 import FullscreenIcon from "@mui/icons-material/Fullscreen";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import PrintIcon from "@mui/icons-material/Print";
+import DownloadIcon from "@mui/icons-material/Download";
 import StarIcon from "@mui/icons-material/Star";
 import StarBorderIcon from "@mui/icons-material/StarBorder";
 import SwapHorizIcon from "@mui/icons-material/SwapHoriz";
@@ -41,6 +42,8 @@ import CameraAltIcon from "@mui/icons-material/CameraAlt";
 import VolumeUpIcon from "@mui/icons-material/VolumeUp";
 import StopIcon from "@mui/icons-material/Stop";
 import GraphicEqIcon from "@mui/icons-material/GraphicEq";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const UNITS = [
@@ -2105,7 +2108,170 @@ export default function App() {
     setPage("recipes");
     showToast(`${inStock.length} pantry items imported to Recipe Generator`, "success");
   };
-
+const exportMealPlanPDF = (plan, title = "Weekly Meal Plan") => {
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+  const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
+ 
+  // ── Header bar ──
+  doc.setFillColor(239, 68, 68);
+  doc.rect(0, 0, pageW, 22, "F");
+ 
+  // Logo emoji area
+  doc.setFillColor(220, 40, 40);
+  doc.roundedRect(10, 4, 14, 14, 3, 3, "F");
+  doc.setFontSize(11);
+  doc.text("🍳", 13.5, 13.5);
+ 
+  // App name
+  doc.setTextColor(255, 255, 255);
+  doc.setFontSize(14);
+  doc.setFont("helvetica", "bold");
+  doc.text("ChefMind", 27, 10);
+  doc.setFontSize(8);
+  doc.setFont("helvetica", "normal");
+  doc.text("AI Kitchen Assistant", 27, 16);
+ 
+  // Plan title (right-aligned in header)
+  doc.setFontSize(12);
+  doc.setFont("helvetica", "bold");
+  doc.text(title, pageW - 12, 10, { align: "right" });
+ 
+  // Generated date
+  const today = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+  doc.setFontSize(7.5);
+  doc.setFont("helvetica", "normal");
+  doc.text(`Generated: ${today}`, pageW - 12, 17, { align: "right" });
+ 
+  // ── Build table data ──
+  const MEAL_TYPES = ["Breakfast", "Lunch", "Dinner", "Snack"];
+  const days = plan.map(d => d.day);
+ 
+  // One row per meal type, one column per day
+  const tableBody = MEAL_TYPES.map(meal => {
+    const row = [
+      {
+        content: meal,
+        styles: {
+          fontStyle: "bold",
+          fillColor: meal === "Breakfast" ? [255, 247, 237]
+            : meal === "Lunch"     ? [240, 253, 244]
+            : meal === "Dinner"    ? [239, 246, 255]
+            :                        [253, 244, 255],
+          textColor: meal === "Breakfast" ? [194, 65, 12]
+            : meal === "Lunch"     ? [21, 128, 61]
+            : meal === "Dinner"    ? [29, 78, 216]
+            :                        [126, 34, 206],
+          halign: "center",
+          valign: "middle",
+          fontSize: 8,
+        },
+      },
+    ];
+ 
+    days.forEach(day => {
+      const dayObj = plan.find(d => d.day === day);
+      const entry  = dayObj?.meals?.[meal];
+      const name   = entry?.name  || "—";
+      const note   = entry?.note  || "";
+      row.push({
+        content: note ? `${name}\n${note}` : name,
+        styles:  {
+          fontSize: 8,
+          cellPadding: 3,
+          valign: "top",
+          textColor: [30, 30, 30],
+          fillColor: [255, 255, 255],
+        },
+      });
+    });
+    return row;
+  });
+ 
+  // Day-name header row colors
+  const DAY_HEADER_COLORS = {
+    Monday:    [249, 115, 22],
+    Tuesday:   [168, 85, 247],
+    Wednesday: [59, 130, 246],
+    Thursday:  [34, 197, 94],
+    Friday:    [239, 68, 68],
+  };
+ 
+  const headRow = [
+    { content: "Meal", styles: { fillColor: [30, 30, 30], textColor: [255, 255, 255], halign: "center", fontStyle: "bold", fontSize: 9 } },
+    ...days.map(day => ({
+      content: day,
+      styles: {
+        fillColor: DAY_HEADER_COLORS[day] || [100, 100, 100],
+        textColor: [255, 255, 255],
+        halign: "center",
+        fontStyle: "bold",
+        fontSize: 9,
+      },
+    })),
+  ];
+ 
+  // Column widths — meal label narrow, days share remaining space equally
+  const usableW   = pageW - 20;
+  const mealColW  = 22;
+  const dayColW   = (usableW - mealColW) / days.length;
+  const colWidths = [mealColW, ...days.map(() => dayColW)];
+ 
+  autoTable(doc, {
+    startY: 26,
+    head: [headRow],
+    body: tableBody,
+    columnStyles: colWidths.reduce((acc, w, i) => { acc[i] = { cellWidth: w }; return acc; }, {}),
+    styles: {
+      lineColor: [229, 231, 235],
+      lineWidth: 0.3,
+      font: "helvetica",
+      cellPadding: 3,
+      minCellHeight: 18,
+    },
+    headStyles: { minCellHeight: 10 },
+    alternateRowStyles: { fillColor: [249, 250, 251] },
+    margin: { left: 10, right: 10 },
+    tableLineColor: [209, 213, 219],
+    tableLineWidth: 0.4,
+    didDrawCell: (data) => {
+      // Bold the meal name part when there's a note (first line)
+      if (data.section === "body" && data.column.index > 0) {
+        const entry = plan.find(d => d.day === days[data.column.index - 1])?.meals?.[MEAL_TYPES[data.row.index]];
+        if (entry?.name && entry?.note) {
+          const x = data.cell.x + 3;
+          const y = data.cell.y + 7;
+          doc.setFontSize(8);
+          doc.setFont("helvetica", "bold");
+          doc.setTextColor(30, 30, 30);
+          doc.text(entry.name, x, y);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(7);
+          doc.setTextColor(107, 114, 128);
+          doc.text(entry.note, x, y + 5, { maxWidth: data.cell.width - 6 });
+        }
+      }
+    },
+  });
+ 
+  // ── Footer ──
+  const finalY = doc.lastAutoTable.finalY || pageH - 20;
+  if (finalY < pageH - 16) {
+    doc.setDrawColor(229, 231, 235);
+    doc.setLineWidth(0.4);
+    doc.line(10, finalY + 6, pageW - 10, finalY + 6);
+    doc.setFontSize(7);
+    doc.setTextColor(156, 163, 175);
+    doc.setFont("helvetica", "normal");
+    doc.text("Generated by ChefMind AI Kitchen Assistant", 10, finalY + 12);
+    doc.text(`Page 1`, pageW - 10, finalY + 12, { align: "right" });
+  }
+ 
+  // ── Save ──
+  const fileName = `${title.replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.pdf`;
+  doc.save(fileName);
+};
+ 
   // ── Shopping list from plan ──
   const openShoppingList = (plan, title) => {
     const allIngredients = [];
@@ -3032,12 +3198,18 @@ export default function App() {
                   <MealPlanGrid plan={mpPantryPlan} onViewRecipe={fetchDetails} recipeRatings={recipeRatings} onRate={setRating} />
                   {mpPantryPlan.length > 0 && (
                     <>
-                      <Box mt={3} display="flex" gap={1.5} flexWrap="wrap">
-                        <Button startIcon={<ShoppingCartIcon />} variant="outlined" onClick={() => openShoppingList(mpPantryPlan, "Selection Plan Shopping List")}
-                          sx={{ borderColor: "#3b82f6", color: "#3b82f6", borderRadius: 2, fontWeight: 700, "&:hover": { background: "#eff6ff" } }}>
-                          Shopping List
-                        </Button>
-                      </Box>
+ <Box mt={3} display="flex" gap={1.5} flexWrap="wrap" alignItems="center">
+  <Button startIcon={<ShoppingCartIcon />} variant="outlined"
+    onClick={() => openShoppingList(mpPantryPlan, "Selection Plan Shopping List")}
+    sx={{ borderColor: "#3b82f6", color: "#3b82f6", borderRadius: 2, fontWeight: 700, "&:hover": { background: "#eff6ff" } }}>
+    Shopping List
+  </Button>
+  <Button startIcon={<DownloadIcon />} variant="outlined"
+    onClick={() => exportMealPlanPDF(mpPantryPlan, "Pantry Selection Meal Plan")}
+    sx={{ borderColor: "#22c55e", color: "#15803d", borderRadius: 2, fontWeight: 700, "&:hover": { background: "#f0fdf4" } }}>
+    Download PDF
+  </Button>
+</Box>
                       <NutritionDashboard plan={mpPantryPlan} />
                     </>
                   )}
@@ -3108,12 +3280,18 @@ export default function App() {
                   <MealPlanGrid plan={mpGroceryPlan} onViewRecipe={fetchDetails} recipeRatings={recipeRatings} onRate={setRating} />
                   {mpGroceryPlan.length > 0 && (
                     <>
-                      <Box mt={3} display="flex" gap={1.5} flexWrap="wrap">
-                        <Button startIcon={<ShoppingCartIcon />} variant="outlined" onClick={() => openShoppingList(mpGroceryPlan, "Full Pantry Plan Shopping List")}
-                          sx={{ borderColor: "#3b82f6", color: "#3b82f6", borderRadius: 2, fontWeight: 700, "&:hover": { background: "#eff6ff" } }}>
-                          Shopping List
-                        </Button>
-                      </Box>
+ <Box mt={3} display="flex" gap={1.5} flexWrap="wrap" alignItems="center">
+  <Button startIcon={<ShoppingCartIcon />} variant="outlined"
+    onClick={() => openShoppingList(mpGroceryPlan, "Full Pantry Plan Shopping List")}
+    sx={{ borderColor: "#3b82f6", color: "#3b82f6", borderRadius: 2, fontWeight: 700, "&:hover": { background: "#eff6ff" } }}>
+    Shopping List
+  </Button>
+  <Button startIcon={<DownloadIcon />} variant="outlined"
+    onClick={() => exportMealPlanPDF(mpGroceryPlan, "Full Pantry Meal Plan")}
+    sx={{ borderColor: "#22c55e", color: "#15803d", borderRadius: 2, fontWeight: 700, "&:hover": { background: "#f0fdf4" } }}>
+    Download PDF
+  </Button>
+</Box>
                       <NutritionDashboard plan={mpGroceryPlan} />
                     </>
                   )}
