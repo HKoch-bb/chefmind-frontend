@@ -1844,6 +1844,14 @@ export default function App() {
   const [recipeByName, setRecipeByName] = useState(null);
   const [recipeByNameLoading, setRecipeByNameLoading] = useState(false);
 
+  // ── Recipe Generator tab state ──
+  const [recipeTab, setRecipeTab] = useState(0);
+
+  // ── Nutrition-based recipe state ──
+  const [nutritionTargets, setNutritionTargets] = useState({ calories: "", protein: "", carbs: "", fat: "" });
+  const [nutritionRecipes, setNutritionRecipes] = useState([]);
+  const [nutritionLoading, setNutritionLoading] = useState(false);
+
   // ── Meal Planner state ──
   const [mpTab, setMpTab] = useState(0);
 
@@ -1986,6 +1994,22 @@ export default function App() {
       setTimeout(() => document.getElementById("byname-anchor")?.scrollIntoView({ behavior: "smooth" }), 150);
     } catch { showToast("Error generating recipe", "error"); }
     setRecipeByNameLoading(false);
+  };
+
+  const generateByNutrition = async () => {
+    const { calories, protein, carbs, fat } = nutritionTargets;
+    if (!calories && !protein && !carbs && !fat) return showToast("Enter at least one nutrition target", "error");
+    setNutritionLoading(true); setNutritionRecipes([]);
+    try {
+      const res = await axios.post(`${API}/generate-by-nutrition`, {
+        targets: nutritionTargets,
+        filters: { cuisine: activeCuisine, foodTypes: activeFoodTypes, diet: activeDiet, difficulty: activeDifficulty },
+        language,
+      });
+      setNutritionRecipes(res.data.recipes || []);
+      setTimeout(() => document.getElementById("nutrition-anchor")?.scrollIntoView({ behavior: "smooth" }), 150);
+    } catch { showToast("Error generating nutrition-based recipes", "error"); }
+    setNutritionLoading(false);
   };
 
   const generatePantryPlan = async () => {
@@ -2839,59 +2863,10 @@ const exportRecipePDF = (recipe, servingMult = 1) => {
               </Box>
             </Box>
 
-            <Box p={4} maxWidth={960} mx="auto" sx={{ position: "relative", zIndex: 1 }}>
+            <Box p={4} maxWidth={1000} mx="auto" sx={{ position: "relative", zIndex: 1 }}>
 
-              {/* Ingredient input */}
-              <Box sx={{ background: "#fff", borderRadius: 3, p: 3, border: "1px solid #f3f4f6", boxShadow: "0 2px 12px rgba(0,0,0,0.05)", mb: 2 }}>
-                <Typography fontWeight={700} mb={2} color="#374151">📦 Your Ingredients</Typography>
-                <Box display="flex" gap={1.5} flexWrap="wrap" alignItems="flex-start">
-                  <TextField label="Ingredient" value={inputName}
-                    onChange={e => setInputName(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && addIngredient()}
-                    placeholder="e.g. eggs" size="small" sx={{ flex: "1 1 150px", minWidth: 130 }} />
-                  <TextField label="Qty" type="number" value={inputQty}
-                    onChange={e => setInputQty(e.target.value)}
-                    onKeyDown={e => e.key === "Enter" && addIngredient()}
-                    placeholder="2" size="small" inputProps={{ min: 0, step: "any" }} sx={{ width: 80 }} />
-                  <FormControl size="small" sx={{ minWidth: 110 }}>
-                    <InputLabel>Unit</InputLabel>
-                    <Select value={inputUnit} label="Unit" onChange={e => setInputUnit(e.target.value)}>
-                      {UNITS.map(u => <MenuItem key={u.value} value={u.value}>{u.label}</MenuItem>)}
-                    </Select>
-                  </FormControl>
-                  <Button variant="contained" onClick={addIngredient} startIcon={<AddCircleOutlineIcon />}
-                    sx={{ background: "linear-gradient(135deg, #ef4444, #f97316)", borderRadius: 2, fontWeight: 700, height: 40, boxShadow: "none", "&:hover": { boxShadow: "0 2px 12px rgba(239,68,68,0.3)" } }}>
-                    Add
-                  </Button>
-                  {/* Voice input */}
-                  <MicButton onResult={(t) => setInputName(prev => prev ? prev + " " + t : t)} />
-                  {/* Image scan */}
-                  <ImageScanButton
-                    accentColor="#ef4444"
-                    onConfirm={(items) => setIngredients(prev => [...prev, ...items])}
-                  />
-                </Box>
-                {ingredients.length === 0 ? (
-                  <Box mt={2} py={2} textAlign="center" sx={{ border: "1.5px dashed #f3f4f6", borderRadius: 2 }}>
-                    <Typography fontSize="0.85rem" color="text.disabled">No ingredients yet — add some above or import from My Pantry</Typography>
-                    <Button size="small" onClick={() => setPage("pantry")} sx={{ mt: 1, color: "#f97316", fontSize: "0.78rem" }}>Go to My Pantry →</Button>
-                  </Box>
-                ) : (
-                  <Box mt={1.5} display="flex" flexWrap="wrap" gap={1}>
-                    {ingredients.map((ing, idx) => (
-                      <Chip key={idx}
-                        label={[ing.qty, ing.unit, ing.name].filter(Boolean).join(" ")}
-                        onDelete={() => setIngredients(ingredients.filter((_, i) => i !== idx))}
-                        deleteIcon={<CloseIcon sx={{ fontSize: "0.85rem !important" }} />}
-                        sx={{ background: "#fff5f5", color: "#ef4444", border: "1px solid #fca5a5", fontWeight: 600, fontSize: "0.8rem", "& .MuiChip-deleteIcon": { color: "#f87171" } }}
-                      />
-                    ))}
-                  </Box>
-                )}
-              </Box>
-
-              {/* Filters — inline with cuisine */}
-              <Box sx={{ background: "#fff", borderRadius: 3, border: "1px solid #f3f4f6", overflow: "hidden", mb: 2 }}>
+              {/* ── Shared Filters (always visible above tabs) ── */}
+              <Box sx={{ background: "#fff", borderRadius: 3, border: "1px solid #f3f4f6", overflow: "hidden", mb: 3 }}>
                 <Box display="flex" alignItems="center" justifyContent="space-between"
                   px={3} py={2} sx={{ cursor: "pointer", "&:hover": { background: "#fafafa" } }}
                   onClick={() => setFiltersOpen(!filtersOpen)}>
@@ -2953,276 +2928,469 @@ const exportRecipePDF = (recipe, servingMult = 1) => {
                 )}
               </Box>
 
-              <GenerateBtn onClick={generateRecipes} loading={recipeLoading} disabled={!ingredients.length} label="✨ Generate Recipes" />
-              <div id="results-anchor" />
+              {/* ── 3 Tabs ── */}
+              <Tabs
+                value={recipeTab}
+                onChange={(_, v) => setRecipeTab(v)}
+                sx={{
+                  mb: 3,
+                  background: "#fff",
+                  borderRadius: 3,
+                  border: "1px solid #f3f4f6",
+                  boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
+                  "& .MuiTab-root": { fontWeight: 700, fontSize: "0.85rem", textTransform: "none", py: 2, px: 3 },
+                  "& .MuiTabs-indicator": { background: "linear-gradient(90deg, #ef4444, #f97316)", height: 3, borderRadius: "3px 3px 0 0" },
+                  "& .Mui-selected": { color: "#ef4444 !important" },
+                }}
+              >
+                <Tab label="🥦 By Ingredients" />
+                <Tab label="🔎 By Name" />
+                <Tab label="📊 By Nutrition" />
+              </Tabs>
 
-              {/* Skeleton loaders while loading */}
-              {recipeLoading && (
-                <>
-                  <SectionHeader accent="lock" icon={<LockIcon sx={{ color: "#f97316", fontSize: 22 }} />} title="🔒 Cook With Exactly What You Have" subtitle="Generating strict recipes…" />
-                  <Grid container spacing={2.5}>{[1,2,3].map(i => <Grid item xs={12} sm={6} md={4} key={i}><SkeletonCard /></Grid>)}</Grid>
-                  <SectionHeader accent="bolt" icon={<BoltIcon sx={{ color: "#22c55e", fontSize: 22 }} />} title="⚡ Expand Your Options" subtitle="Generating flexible recipes…" />
-                  <Grid container spacing={2.5}>{[1,2,3].map(i => <Grid item xs={12} sm={6} md={4} key={i}><SkeletonCard /></Grid>)}</Grid>
-                </>
-              )}
-
-              {!recipeLoading && (recipes.strict.length > 0 || recipes.flexible.length > 0) && (
-                <>
-                  <SectionHeader accent="lock" icon={<LockIcon sx={{ color: "#f97316", fontSize: 22 }} />} title="🔒 Cook With Exactly What You Have" subtitle="Recipes use only the exact ingredients & quantities you listed — no extras, no pantry assumptions" />
-                  <Grid container spacing={2.5}>
-                    {recipes.strict.map((r, i) => (
-                      <Grid item xs={12} sm={6} md={4} key={i}>
-                        <Card sx={cardSx}>
-                          <Box onClick={() => fetchDetails(r.title)}>
-                            <Box sx={{ position: "relative", height: 160, overflow: "hidden" }}>
-                              <RecipeImage title={r.title} height={160} />
-                              <Box sx={badgeSx("rgba(249,115,22,0.92)")}>🔒 EXACT MATCH</Box>
-                            </Box>
-                            <CardContent sx={{ p: 2, pb: 1 }}>
-                              <Typography fontWeight={700} fontSize="0.93rem" color="#1a1a1a" mb={0.5}>{r.title}</Typography>
-                              <Typography variant="body2" color="text.secondary" fontSize="0.82rem">{r.preview}</Typography>
-                            </CardContent>
-                          </Box>
-                          <Box px={2} pb={1.5} display="flex" alignItems="center" justifyContent="space-between" onClick={e => e.stopPropagation()}>
-                            <StarRating value={recipeRatings[r.title] || 0} onChange={(v) => setRating(r.title, v)} size={16} />
-                            {(recipeRatings[r.title] || 0) > 0 && (
-                              <Typography variant="caption" color="#f59e0b" fontWeight={700} fontSize="0.65rem">{recipeRatings[r.title]}/5 ⭐</Typography>
-                            )}
-                          </Box>
-                        </Card>
-                      </Grid>
-                    ))}
-                  </Grid>
-
-                  <SectionHeader accent="bolt" icon={<BoltIcon sx={{ color: "#22c55e", fontSize: 22 }} />} title="⚡ Expand Your Options" subtitle="Your ingredients as the base — plus extra items needed. Food type & diet filters strictly applied" />
-                  <Grid container spacing={2.5}>
-                    {recipes.flexible.map((r, i) => (
-                      <Grid item xs={12} sm={6} md={4} key={i}>
-                        <Card sx={cardSx}>
-                          <Box onClick={() => fetchDetails(r.title)}>
-                            <Box sx={{ position: "relative", height: 160, overflow: "hidden" }}>
-                              <RecipeImage title={r.title} height={160} />
-                              <Box sx={badgeSx("rgba(34,197,94,0.92)")}>⚡ EXPANDED</Box>
-                            </Box>
-                            <CardContent sx={{ p: 2, pb: 1 }}>
-                              <Typography fontWeight={700} fontSize="0.93rem" color="#1a1a1a" mb={0.5}>{r.title}</Typography>
-                              <Typography variant="body2" color="text.secondary" fontSize="0.82rem" mb={1}>{r.preview}</Typography>
-                              {r.missing_ingredients?.length > 0 && (
-                                <Box>
-                                  <Typography variant="caption" sx={{ fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em", fontSize: "0.64rem" }}>You'll also need:</Typography>
-                                  <Box display="flex" flexWrap="wrap" gap={0.5} mt={0.5}>
-                                    {r.missing_ingredients.map((m, idx) => (
-                                      <Chip key={idx} label={[m.qty, m.unit, m.name].filter(Boolean).join(" ")} size="small"
-                                        sx={{ background: "#f0fdf4", color: "#15803d", border: "1px solid #86efac", fontWeight: 600, fontSize: "0.71rem", height: 22 }} />
-                                    ))}
-                                  </Box>
-                                </Box>
-                              )}
-                            </CardContent>
-                          </Box>
-                          {r.missing_ingredients?.length > 0 && (
-                            <Box px={2} pb={1}>
-                              <Button size="small" startIcon={<ShoppingCartIcon sx={{ fontSize: 14 }} />}
-                                onClick={() => openFlexibleShoppingList(r)}
-                                sx={{ color: "#15803d", fontSize: "0.75rem", background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 1.5, py: 0.3 }}>
-                                Shopping List
-                              </Button>
-                            </Box>
-                          )}
-                          <Box px={2} pb={1.5} display="flex" alignItems="center" justifyContent="space-between" onClick={e => e.stopPropagation()}>
-                            <StarRating value={recipeRatings[r.title] || 0} onChange={(v) => setRating(r.title, v)} size={16} />
-                            {(recipeRatings[r.title] || 0) > 0 && (
-                              <Typography variant="caption" color="#f59e0b" fontWeight={700} fontSize="0.65rem">{recipeRatings[r.title]}/5 ⭐</Typography>
-                            )}
-                          </Box>
-                        </Card>
-                      </Grid>
-                    ))}
-                  </Grid>
-                </>
-              )}
-
-              {/* Divider */}
-              <Box my={5} sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-                <Box sx={{ flex: 1, height: "1px", background: "linear-gradient(90deg, transparent, #f97316, transparent)" }} />
-                <Box sx={{ px: 2.5, py: 0.8, background: "linear-gradient(135deg, #7c2d12, #9a3412)", borderRadius: "100px", border: "1px solid rgba(249,115,22,0.4)", boxShadow: "0 4px 16px rgba(249,115,22,0.2)" }}>
-                  <Typography sx={{ color: "#fdba74", fontSize: "0.72rem", fontWeight: 800, letterSpacing: "0.12em", textTransform: "uppercase" }}>✦ Or Generate by Name</Typography>
-                </Box>
-                <Box sx={{ flex: 1, height: "1px", background: "linear-gradient(90deg, transparent, #f97316, transparent)" }} />
-              </Box>
-
-              {/* Generate by name */}
-              <Box sx={{ background: "linear-gradient(135deg, #fff7ed 0%, #fff 60%)", borderRadius: 4, border: "1.5px solid #fed7aa", boxShadow: "0 4px 24px rgba(249,115,22,0.08)", overflow: "hidden", mb: 3 }}>
-                <Box sx={{ background: "linear-gradient(135deg, #1c0a02, #3b1208)", px: 3, py: 2.5, display: "flex", alignItems: "center", gap: 2 }}>
-                  <Box sx={{ width: 38, height: 38, borderRadius: 2, background: "rgba(249,115,22,0.25)", border: "1px solid rgba(249,115,22,0.4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.2rem", flexShrink: 0 }}>🔎</Box>
-                  <Box>
-                    <Typography sx={{ fontWeight: 800, color: "#fff", fontSize: "1rem", lineHeight: 1.2 }}>Generate a Specific Recipe</Typography>
-                    <Typography sx={{ color: "rgba(255,255,255,0.45)", fontSize: "0.78rem", mt: 0.2 }}>Name any dish — filters apply strictly. Say "Ramen" + Japanese + Easy and get a filter-compliant version.</Typography>
-                  </Box>
-                </Box>
-                <Box p={3}>
-                  {totalFilters > 0 && (
-                    <Box mb={2.5} px={2} py={1.2} sx={{ background: "#fef2f2", borderRadius: 2, border: "1px solid #fca5a5", display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
-                      <Typography variant="caption" sx={{ fontWeight: 700, color: "#ef4444", mr: 0.5 }}>🎯 Active filters will be applied:</Typography>
-                      {[...activeCuisine, ...activeFoodTypes, ...activeDiet, ...(activeDifficulty ? [activeDifficulty] : [])].map(f => (
-                        <Chip key={f} label={f} size="small" sx={{ background: "#fff5f5", color: "#ef4444", border: "1px solid #fca5a5", fontWeight: 600, fontSize: "0.7rem", height: 20 }} />
-                      ))}
+              {/* ══ TAB 0: By Ingredients ══ */}
+              {recipeTab === 0 && (
+                <Box>
+                  {/* Ingredient input */}
+                  <Box sx={{ background: "#fff", borderRadius: 3, p: 3, border: "1px solid #f3f4f6", boxShadow: "0 2px 12px rgba(0,0,0,0.05)", mb: 2 }}>
+                    <Box display="flex" alignItems="center" justifyContent="space-between" mb={2} flexWrap="wrap" gap={1}>
+                      <Typography fontWeight={700} color="#374151">📦 Your Ingredients</Typography>
+                      <Button size="small" variant="outlined" onClick={() => { setIngredients(pantryItems.filter(i => i.inStock)); showToast("Pantry imported!", "success"); }}
+                        sx={{ borderColor: "#f97316", color: "#f97316", borderRadius: 2, fontWeight: 700, fontSize: "0.75rem" }}>
+                        Import from Pantry
+                      </Button>
                     </Box>
-                  )}
-                  <Box display="flex" gap={1.5} alignItems="flex-start" flexWrap="wrap">
-                    <TextField value={recipeNameInput} onChange={e => setRecipeNameInput(e.target.value)} onKeyDown={e => e.key === "Enter" && generateByName()}
-                      placeholder="e.g. Mayonnaise, Pad Thai, Tiramisu, Butter Chicken…" size="small"
-                      sx={{ flex: "1 1 260px", "& .MuiOutlinedInput-root": { borderRadius: 2, background: "#fff" } }}
-                      InputProps={{
-                        startAdornment: <Box component="span" sx={{ mr: 1, fontSize: "1rem" }}>🍽️</Box>,
-                        endAdornment: recipeNameInput ? (<IconButton size="small" onClick={() => { setRecipeNameInput(""); setRecipeByName(null); }} sx={{ p: 0.3 }}><CloseIcon sx={{ fontSize: 15, color: "#9ca3af" }} /></IconButton>) : null,
-                      }} />
-                    <Button variant="contained" onClick={generateByName} disabled={recipeByNameLoading || !recipeNameInput.trim()}
-                      sx={{ background: "linear-gradient(135deg, #f97316, #ef4444)", borderRadius: 2, fontWeight: 700, height: 40, boxShadow: "0 4px 14px rgba(239,68,68,0.3)", "&:hover": { boxShadow: "0 6px 20px rgba(239,68,68,0.45)" }, whiteSpace: "nowrap" }}>
-                      {recipeByNameLoading ? <Box display="flex" alignItems="center" gap={1}><CircularProgress size={16} sx={{ color: "#fff" }} /><span>Generating…</span></Box> : "✨ Generate Recipe"}
-                    </Button>
-                  </Box>
-                  <Box mt={1.5} display="flex" flexWrap="wrap" gap={0.8}>
-                    {["Mayonnaise","Pad Thai","Tiramisu","Ramen","Guacamole","Pancakes","Biryani","Hummus"].map(s => (
-                      <Box key={s} onClick={() => setRecipeNameInput(s)} sx={{
-                        px: 1.4, py: 0.4, borderRadius: "20px", cursor: "pointer",
-                        background: recipeNameInput === s ? "#fff7ed" : "#f9fafb",
-                        border: `1px solid ${recipeNameInput === s ? "#f97316" : "#e5e7eb"}`,
-                        color: recipeNameInput === s ? "#c2410c" : "#6b7280",
-                        fontSize: "0.75rem", fontWeight: 600, transition: "all 0.15s",
-                        "&:hover": { borderColor: "#f97316", color: "#c2410c", background: "#fff7ed" },
-                      }}>{s}</Box>
-                    ))}
-                  </Box>
-                </Box>
-              </Box>
-
-              <div id="byname-anchor" />
-
-              {/* Recipe by name result */}
-              {recipeByNameLoading && (
-                <Box sx={{ background: "#fff", borderRadius: 4, border: "1.5px solid #fed7aa", overflow: "hidden", mb: 4 }}>
-                  <Box sx={{ height: 220, ...shimmerSx }} />
-                  <Box p={3}><Box sx={{ height: 20, width: "60%", borderRadius: 1, mb: 2, ...shimmerSx }} /><Box sx={{ height: 14, width: "90%", borderRadius: 1, mb: 1, ...shimmerSx }} /></Box>
-                </Box>
-              )}
-
-              {recipeByName && !recipeByNameLoading && (
-                <Box sx={{ background: "#fff", borderRadius: 4, border: "1.5px solid #fed7aa", boxShadow: "0 8px 32px rgba(249,115,22,0.12)", overflow: "hidden", mb: 4 }}>
-                  <Box sx={{ position: "relative", height: 220, overflow: "hidden" }}>
-                    <RecipeImage title={recipeByName._title} height={220} />
-                    <Box sx={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.1) 60%, transparent 100%)" }} />
-                    {recipeByName.filter_notes && (
-                      <Box sx={{ position: "absolute", top: 12, left: 12, background: "rgba(239,68,68,0.9)", backdropFilter: "blur(8px)", borderRadius: "8px", px: 1.5, py: 0.5, border: "1px solid rgba(255,255,255,0.2)" }}>
-                        <Typography sx={{ color: "#fff", fontSize: "0.7rem", fontWeight: 700 }}>🎯 {recipeByName.filter_notes}</Typography>
-                      </Box>
-                    )}
-                    {recipeByName.difficulty_label && (
-                      <Box sx={{ position: "absolute", top: 12, right: 12, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)", borderRadius: "8px", px: 1.5, py: 0.5 }}>
-                        <Typography sx={{ color: "#fff", fontSize: "0.7rem", fontWeight: 700 }}>
-                          {recipeByName.difficulty_label === "Easy" ? "🟢" : recipeByName.difficulty_label === "Medium" ? "🟡" : "🔴"} {recipeByName.difficulty_label}
-                        </Typography>
-                      </Box>
-                    )}
-                    <Box sx={{ position: "absolute", bottom: 16, left: 20, right: 20 }}>
-                      <Typography sx={{ fontWeight: 900, fontSize: "1.6rem", color: "#fff", letterSpacing: "-0.5px", lineHeight: 1.1, textShadow: "0 2px 12px rgba(0,0,0,0.5)" }}>{recipeByName._title}</Typography>
+                    <Box display="flex" gap={1.5} flexWrap="wrap" alignItems="flex-start">
+                      <TextField label="Ingredient" value={inputName}
+                        onChange={e => setInputName(e.target.value)}
+                        onKeyDown={e => e.key === "Enter" && addIngredient()}
+                        placeholder="e.g. eggs" size="small" sx={{ flex: "1 1 150px", minWidth: 130 }} />
+                      <TextField label="Qty" type="number" value={inputQty}
+                        onChange={e => setInputQty(e.target.value)}
+                        onKeyDown={e => e.key === "Enter" && addIngredient()}
+                        placeholder="2" size="small" inputProps={{ min: 0, step: "any" }} sx={{ width: 80 }} />
+                      <FormControl size="small" sx={{ minWidth: 110 }}>
+                        <InputLabel>Unit</InputLabel>
+                        <Select value={inputUnit} label="Unit" onChange={e => setInputUnit(e.target.value)}>
+                          {UNITS.map(u => <MenuItem key={u.value} value={u.value}>{u.label}</MenuItem>)}
+                        </Select>
+                      </FormControl>
+                      <Button variant="contained" onClick={addIngredient} startIcon={<AddCircleOutlineIcon />}
+                        sx={{ background: "linear-gradient(135deg, #ef4444, #f97316)", borderRadius: 2, fontWeight: 700, height: 40, boxShadow: "none", "&:hover": { boxShadow: "0 2px 12px rgba(239,68,68,0.3)" } }}>
+                        Add
+                      </Button>
+                      <MicButton onResult={(t) => setInputName(prev => prev ? prev + " " + t : t)} />
+                      <ImageScanButton accentColor="#ef4444" onConfirm={(items) => setIngredients(prev => [...prev, ...items])} />
                     </Box>
-                  </Box>
-                  <Box p={3}>
-                    <Box display="flex" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2} mb={3}>
-                      <Box display="flex" gap={1.5} flexWrap="wrap">
-                        {[{ icon: "🍽️", val: recipeByName.servings, label: "Servings" }, { icon: "⏱️", val: recipeByName.prep_time, label: "Prep" }, { icon: "🔥", val: recipeByName.cook_time, label: "Cook" }].filter(m => m.val).map((m, i) => (
-                          <Box key={i} sx={{ background: "#fff7ed", borderRadius: 2, px: 2, py: 1, border: "1px solid #fed7aa", textAlign: "center" }}>
-                            <Typography fontSize="1.1rem">{m.icon}</Typography>
-                            <Typography fontWeight={700} fontSize="0.85rem">{m.val}</Typography>
-                            <Typography variant="caption" color="text.secondary">{m.label}</Typography>
-                          </Box>
+                    {ingredients.length === 0 ? (
+                      <Box mt={2} py={2} textAlign="center" sx={{ border: "1.5px dashed #f3f4f6", borderRadius: 2 }}>
+                        <Typography fontSize="0.85rem" color="text.disabled">No ingredients yet — add some above or import from My Pantry</Typography>
+                        <Button size="small" onClick={() => setPage("pantry")} sx={{ mt: 1, color: "#f97316", fontSize: "0.78rem" }}>Go to My Pantry →</Button>
+                      </Box>
+                    ) : (
+                      <Box mt={1.5} display="flex" flexWrap="wrap" gap={1}>
+                        {ingredients.map((ing, idx) => (
+                          <Chip key={idx}
+                            label={[ing.qty, ing.unit, ing.name].filter(Boolean).join(" ")}
+                            onDelete={() => setIngredients(ingredients.filter((_, i) => i !== idx))}
+                            deleteIcon={<CloseIcon sx={{ fontSize: "0.85rem !important" }} />}
+                            sx={{ background: "#fff5f5", color: "#ef4444", border: "1px solid #fca5a5", fontWeight: 600, fontSize: "0.8rem", "& .MuiChip-deleteIcon": { color: "#f87171" } }}
+                          />
                         ))}
                       </Box>
-                      <Button variant="outlined" startIcon={<BookmarkBorderIcon />}
-                        onClick={() => {
-                          if (savedRecipes.find(r => r._title === recipeByName._title)) { showToast("Already saved!", "error"); return; }
-                          const updated = [...savedRecipes, recipeByName];
-                          setSavedRecipes(updated);
-                          localStorage.setItem("savedRecipes", JSON.stringify(updated));
-                          showToast(`"${recipeByName._title}" saved! 📖`, "success");
-                        }}
-                        sx={{ borderColor: "#f97316", color: "#f97316", borderRadius: 2, fontWeight: 700, "&:hover": { background: "#fff7ed", borderColor: "#ea580c" } }}>
-                        Save Recipe
-                      </Button>
-                      <Button variant="outlined" startIcon={<DownloadIcon />}
-                        onClick={() => exportRecipePDF(recipeByName)}
-                        sx={{ borderColor: "#22c55e", color: "#15803d", borderRadius: 2, fontWeight: 700, "&:hover": { background: "#f0fdf4" } }}>
-                        Download PDF
-                      </Button>
-                      <Box display="flex" alignItems="center" gap={1} onClick={e => e.stopPropagation()}>
-                        <StarRating
-                          value={recipeRatings[recipeByName._title] || 0}
-                          onChange={(v) => setRating(recipeByName._title, v)}
-                          size={20}
-                        />
-                        {(recipeRatings[recipeByName._title] || 0) > 0 && (
-                          <Typography variant="caption" color="#f59e0b" fontWeight={700}>{recipeRatings[recipeByName._title]}/5</Typography>
+                    )}
+                  </Box>
+
+                  <GenerateBtn onClick={generateRecipes} loading={recipeLoading} disabled={!ingredients.length} label="✨ Generate Recipes from Ingredients" />
+                  <div id="results-anchor" />
+
+                  {recipeLoading && (
+                    <>
+                      <SectionHeader accent="lock" icon={<LockIcon sx={{ color: "#f97316", fontSize: 22 }} />} title="🔒 Cook With Exactly What You Have" subtitle="Generating strict recipes…" />
+                      <Grid container spacing={2.5}>{[1,2,3].map(i => <Grid item xs={12} sm={6} md={4} key={i}><SkeletonCard /></Grid>)}</Grid>
+                      <SectionHeader accent="bolt" icon={<BoltIcon sx={{ color: "#22c55e", fontSize: 22 }} />} title="⚡ Expand Your Options" subtitle="Generating flexible recipes…" />
+                      <Grid container spacing={2.5}>{[1,2,3].map(i => <Grid item xs={12} sm={6} md={4} key={i}><SkeletonCard /></Grid>)}</Grid>
+                    </>
+                  )}
+
+                  {!recipeLoading && (recipes.strict.length > 0 || recipes.flexible.length > 0) && (
+                    <>
+                      <SectionHeader accent="lock" icon={<LockIcon sx={{ color: "#f97316", fontSize: 22 }} />} title="🔒 Cook With Exactly What You Have" subtitle="Recipes use only the exact ingredients you listed — no extras" />
+                      <Grid container spacing={2.5}>
+                        {recipes.strict.map((r, i) => (
+                          <Grid item xs={12} sm={6} md={4} key={i}>
+                            <Card sx={cardSx}>
+                              <Box onClick={() => fetchDetails(r.title)}>
+                                <Box sx={{ position: "relative", height: 160, overflow: "hidden" }}>
+                                  <RecipeImage title={r.title} height={160} />
+                                  <Box sx={badgeSx("rgba(249,115,22,0.92)")}>🔒 EXACT MATCH</Box>
+                                </Box>
+                                <CardContent sx={{ p: 2, pb: 1 }}>
+                                  <Typography fontWeight={700} fontSize="0.93rem" color="#1a1a1a" mb={0.5}>{r.title}</Typography>
+                                  <Typography variant="body2" color="text.secondary" fontSize="0.82rem">{r.preview}</Typography>
+                                </CardContent>
+                              </Box>
+                              <Box px={2} pb={1.5} display="flex" alignItems="center" justifyContent="space-between" onClick={e => e.stopPropagation()}>
+                                <StarRating value={recipeRatings[r.title] || 0} onChange={(v) => setRating(r.title, v)} size={16} />
+                                {(recipeRatings[r.title] || 0) > 0 && <Typography variant="caption" color="#f59e0b" fontWeight={700} fontSize="0.65rem">{recipeRatings[r.title]}/5 ⭐</Typography>}
+                              </Box>
+                            </Card>
+                          </Grid>
+                        ))}
+                      </Grid>
+
+                      <SectionHeader accent="bolt" icon={<BoltIcon sx={{ color: "#22c55e", fontSize: 22 }} />} title="⚡ Expand Your Options" subtitle="Your ingredients as the base — plus smart extras suggested" />
+                      <Grid container spacing={2.5}>
+                        {recipes.flexible.map((r, i) => (
+                          <Grid item xs={12} sm={6} md={4} key={i}>
+                            <Card sx={cardSx}>
+                              <Box onClick={() => fetchDetails(r.title)}>
+                                <Box sx={{ position: "relative", height: 160, overflow: "hidden" }}>
+                                  <RecipeImage title={r.title} height={160} />
+                                  <Box sx={badgeSx("rgba(34,197,94,0.92)")}>⚡ EXPANDED</Box>
+                                </Box>
+                                <CardContent sx={{ p: 2, pb: 1 }}>
+                                  <Typography fontWeight={700} fontSize="0.93rem" color="#1a1a1a" mb={0.5}>{r.title}</Typography>
+                                  <Typography variant="body2" color="text.secondary" fontSize="0.82rem" mb={1}>{r.preview}</Typography>
+                                  {r.missing_ingredients?.length > 0 && (
+                                    <Box>
+                                      <Typography variant="caption" sx={{ fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.06em", fontSize: "0.64rem" }}>You'll also need:</Typography>
+                                      <Box display="flex" flexWrap="wrap" gap={0.5} mt={0.5}>
+                                        {r.missing_ingredients.map((m, idx) => (
+                                          <Chip key={idx} label={[m.qty, m.unit, m.name].filter(Boolean).join(" ")} size="small"
+                                            sx={{ background: "#f0fdf4", color: "#15803d", border: "1px solid #86efac", fontWeight: 600, fontSize: "0.71rem", height: 22 }} />
+                                        ))}
+                                      </Box>
+                                    </Box>
+                                  )}
+                                </CardContent>
+                              </Box>
+                              {r.missing_ingredients?.length > 0 && (
+                                <Box px={2} pb={1}>
+                                  <Button size="small" startIcon={<ShoppingCartIcon sx={{ fontSize: 14 }} />}
+                                    onClick={() => openFlexibleShoppingList(r)}
+                                    sx={{ color: "#15803d", fontSize: "0.75rem", background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 1.5, py: 0.3 }}>
+                                    Shopping List
+                                  </Button>
+                                </Box>
+                              )}
+                              <Box px={2} pb={1.5} display="flex" alignItems="center" justifyContent="space-between" onClick={e => e.stopPropagation()}>
+                                <StarRating value={recipeRatings[r.title] || 0} onChange={(v) => setRating(r.title, v)} size={16} />
+                                {(recipeRatings[r.title] || 0) > 0 && <Typography variant="caption" color="#f59e0b" fontWeight={700} fontSize="0.65rem">{recipeRatings[r.title]}/5 ⭐</Typography>}
+                              </Box>
+                            </Card>
+                          </Grid>
+                        ))}
+                      </Grid>
+                    </>
+                  )}
+                </Box>
+              )}
+
+              {/* ══ TAB 1: By Name ══ */}
+              {recipeTab === 1 && (
+                <Box>
+                  <Box sx={{ background: "linear-gradient(135deg, #fff7ed 0%, #fff 60%)", borderRadius: 4, border: "1.5px solid #fed7aa", boxShadow: "0 4px 24px rgba(249,115,22,0.08)", overflow: "hidden", mb: 3 }}>
+                    <Box sx={{ background: "linear-gradient(135deg, #1c0a02, #3b1208)", px: 3, py: 2.5, display: "flex", alignItems: "center", gap: 2 }}>
+                      <Box sx={{ width: 38, height: 38, borderRadius: 2, background: "rgba(249,115,22,0.25)", border: "1px solid rgba(249,115,22,0.4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.2rem", flexShrink: 0 }}>🔎</Box>
+                      <Box>
+                        <Typography sx={{ fontWeight: 800, color: "#fff", fontSize: "1rem", lineHeight: 1.2 }}>Generate a Specific Recipe</Typography>
+                        <Typography sx={{ color: "rgba(255,255,255,0.45)", fontSize: "0.78rem", mt: 0.2 }}>Name any dish — active filters apply strictly. Try "Ramen" + Japanese + Easy.</Typography>
+                      </Box>
+                    </Box>
+                    <Box p={3}>
+                      {totalFilters > 0 && (
+                        <Box mb={2.5} px={2} py={1.2} sx={{ background: "#fef2f2", borderRadius: 2, border: "1px solid #fca5a5", display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+                          <Typography variant="caption" sx={{ fontWeight: 700, color: "#ef4444", mr: 0.5 }}>🎯 Active filters will be applied:</Typography>
+                          {[...activeCuisine, ...activeFoodTypes, ...activeDiet, ...(activeDifficulty ? [activeDifficulty] : [])].map(f => (
+                            <Chip key={f} label={f} size="small" sx={{ background: "#fff5f5", color: "#ef4444", border: "1px solid #fca5a5", fontWeight: 600, fontSize: "0.7rem", height: 20 }} />
+                          ))}
+                        </Box>
+                      )}
+                      <Box display="flex" gap={1.5} alignItems="flex-start" flexWrap="wrap">
+                        <TextField value={recipeNameInput} onChange={e => setRecipeNameInput(e.target.value)} onKeyDown={e => e.key === "Enter" && generateByName()}
+                          placeholder="e.g. Mayonnaise, Pad Thai, Tiramisu, Butter Chicken…" size="small"
+                          sx={{ flex: "1 1 260px", "& .MuiOutlinedInput-root": { borderRadius: 2, background: "#fff" } }}
+                          InputProps={{
+                            startAdornment: <Box component="span" sx={{ mr: 1, fontSize: "1rem" }}>🍽️</Box>,
+                            endAdornment: recipeNameInput ? (<IconButton size="small" onClick={() => { setRecipeNameInput(""); setRecipeByName(null); }} sx={{ p: 0.3 }}><CloseIcon sx={{ fontSize: 15, color: "#9ca3af" }} /></IconButton>) : null,
+                          }} />
+                        <Button variant="contained" onClick={generateByName} disabled={recipeByNameLoading || !recipeNameInput.trim()}
+                          sx={{ background: "linear-gradient(135deg, #f97316, #ef4444)", borderRadius: 2, fontWeight: 700, height: 40, boxShadow: "0 4px 14px rgba(239,68,68,0.3)", whiteSpace: "nowrap" }}>
+                          {recipeByNameLoading ? <Box display="flex" alignItems="center" gap={1}><CircularProgress size={16} sx={{ color: "#fff" }} /><span>Generating…</span></Box> : "✨ Generate Recipe"}
+                        </Button>
+                      </Box>
+                      <Box mt={1.5} display="flex" flexWrap="wrap" gap={0.8}>
+                        {["Mayonnaise","Pad Thai","Tiramisu","Ramen","Guacamole","Pancakes","Biryani","Hummus"].map(s => (
+                          <Box key={s} onClick={() => setRecipeNameInput(s)} sx={{
+                            px: 1.4, py: 0.4, borderRadius: "20px", cursor: "pointer",
+                            background: recipeNameInput === s ? "#fff7ed" : "#f9fafb",
+                            border: `1px solid ${recipeNameInput === s ? "#f97316" : "#e5e7eb"}`,
+                            color: recipeNameInput === s ? "#c2410c" : "#6b7280",
+                            fontSize: "0.75rem", fontWeight: 600, transition: "all 0.15s",
+                            "&:hover": { borderColor: "#f97316", color: "#c2410c", background: "#fff7ed" },
+                          }}>{s}</Box>
+                        ))}
+                      </Box>
+                    </Box>
+                  </Box>
+
+                  <div id="byname-anchor" />
+
+                  {recipeByNameLoading && (
+                    <Box sx={{ background: "#fff", borderRadius: 4, border: "1.5px solid #fed7aa", overflow: "hidden", mb: 4 }}>
+                      <Box sx={{ height: 220, ...shimmerSx }} />
+                      <Box p={3}><Box sx={{ height: 20, width: "60%", borderRadius: 1, mb: 2, ...shimmerSx }} /><Box sx={{ height: 14, width: "90%", borderRadius: 1, mb: 1, ...shimmerSx }} /></Box>
+                    </Box>
+                  )}
+
+                  {recipeByName && !recipeByNameLoading && (
+                    <Box sx={{ background: "#fff", borderRadius: 4, border: "1.5px solid #fed7aa", boxShadow: "0 8px 32px rgba(249,115,22,0.12)", overflow: "hidden", mb: 4 }}>
+                      <Box sx={{ position: "relative", height: 220, overflow: "hidden" }}>
+                        <RecipeImage title={recipeByName._title} height={220} />
+                        <Box sx={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.75) 0%, rgba(0,0,0,0.1) 60%, transparent 100%)" }} />
+                        {recipeByName.filter_notes && (
+                          <Box sx={{ position: "absolute", top: 12, left: 12, background: "rgba(239,68,68,0.9)", backdropFilter: "blur(8px)", borderRadius: "8px", px: 1.5, py: 0.5 }}>
+                            <Typography sx={{ color: "#fff", fontSize: "0.7rem", fontWeight: 700 }}>🎯 {recipeByName.filter_notes}</Typography>
+                          </Box>
+                        )}
+                        {recipeByName.difficulty_label && (
+                          <Box sx={{ position: "absolute", top: 12, right: 12, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(8px)", borderRadius: "8px", px: 1.5, py: 0.5 }}>
+                            <Typography sx={{ color: "#fff", fontSize: "0.7rem", fontWeight: 700 }}>
+                              {recipeByName.difficulty_label === "Easy" ? "🟢" : recipeByName.difficulty_label === "Medium" ? "🟡" : "🔴"} {recipeByName.difficulty_label}
+                            </Typography>
+                          </Box>
+                        )}
+                        <Box sx={{ position: "absolute", bottom: 16, left: 20, right: 20 }}>
+                          <Typography sx={{ fontWeight: 900, fontSize: "1.6rem", color: "#fff", letterSpacing: "-0.5px", lineHeight: 1.1, textShadow: "0 2px 12px rgba(0,0,0,0.5)" }}>{recipeByName._title}</Typography>
+                        </Box>
+                      </Box>
+                      <Box p={3}>
+                        <Box display="flex" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={2} mb={3}>
+                          <Box display="flex" gap={1.5} flexWrap="wrap">
+                            {[{ icon: "🍽️", val: recipeByName.servings, label: "Servings" }, { icon: "⏱️", val: recipeByName.prep_time, label: "Prep" }, { icon: "🔥", val: recipeByName.cook_time, label: "Cook" }].filter(m => m.val).map((m, i) => (
+                              <Box key={i} sx={{ background: "#fff7ed", borderRadius: 2, px: 2, py: 1, border: "1px solid #fed7aa", textAlign: "center" }}>
+                                <Typography fontSize="1.1rem">{m.icon}</Typography>
+                                <Typography fontWeight={700} fontSize="0.85rem">{m.val}</Typography>
+                                <Typography variant="caption" color="text.secondary">{m.label}</Typography>
+                              </Box>
+                            ))}
+                          </Box>
+                          <Box display="flex" gap={1.5} flexWrap="wrap" alignItems="center">
+                            <Button variant="outlined" startIcon={<BookmarkBorderIcon />}
+                              onClick={() => {
+                                if (savedRecipes.find(r => r._title === recipeByName._title)) { showToast("Already saved!", "error"); return; }
+                                const updated = [...savedRecipes, recipeByName];
+                                setSavedRecipes(updated);
+                                localStorage.setItem("savedRecipes", JSON.stringify(updated));
+                                showToast(`"${recipeByName._title}" saved! 📖`, "success");
+                              }}
+                              sx={{ borderColor: "#f97316", color: "#f97316", borderRadius: 2, fontWeight: 700, "&:hover": { background: "#fff7ed" } }}>
+                              Save Recipe
+                            </Button>
+                            <Button variant="outlined" startIcon={<DownloadIcon />}
+                              onClick={() => exportRecipePDF(recipeByName)}
+                              sx={{ borderColor: "#22c55e", color: "#15803d", borderRadius: 2, fontWeight: 700, "&:hover": { background: "#f0fdf4" } }}>
+                              Download PDF
+                            </Button>
+                            <Box display="flex" alignItems="center" gap={1} onClick={e => e.stopPropagation()}>
+                              <StarRating value={recipeRatings[recipeByName._title] || 0} onChange={(v) => setRating(recipeByName._title, v)} size={20} />
+                              {(recipeRatings[recipeByName._title] || 0) > 0 && <Typography variant="caption" color="#f59e0b" fontWeight={700}>{recipeRatings[recipeByName._title]}/5</Typography>}
+                            </Box>
+                          </Box>
+                        </Box>
+                        <RecipeAudioPlayer recipe={recipeByName} language={language} />
+                        <Box mb={3} p={2} sx={{ background: "#fff7ed", borderRadius: 2, border: "1px solid #fed7aa" }}>
+                          <Typography fontWeight={800} fontSize="0.8rem" color="#c2410c" mb={0.5} sx={{ textTransform: "uppercase", letterSpacing: "0.06em" }}>Overview</Typography>
+                          <Typography color="#374151" fontSize="0.92rem" lineHeight={1.6}>{recipeByName.overview}</Typography>
+                        </Box>
+                        <Grid container spacing={3}>
+                          <Grid item xs={12} md={5}>
+                            <Typography variant="h6" fontWeight={800} mb={1.5} color="#1a1a1a">🧂 Ingredients</Typography>
+                            <Box component="ul" sx={{ pl: 2, m: 0 }}>
+                              {recipeByName.ingredients?.main?.map((ing, idx) => (
+                                <Box component="li" key={idx} sx={{ mb: 0.8 }}>
+                                  <Typography fontSize="0.9rem" color="#374151"><Box component="span" fontWeight={600}>{ing.quantity}</Box> {ing.name}</Typography>
+                                </Box>
+                              ))}
+                            </Box>
+                          </Grid>
+                          <Grid item xs={12} md={7}>
+                            <Typography variant="h6" fontWeight={800} mb={1.5} color="#1a1a1a">👨‍🍳 Instructions</Typography>
+                            <Box>
+                              {recipeByName.steps?.map((s, idx) => (
+                                <Box key={idx} display="flex" gap={1.5} mb={1.5}>
+                                  <Box sx={{ width: 26, height: 26, borderRadius: "50%", flexShrink: 0, background: "linear-gradient(135deg, #f97316, #ef4444)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: "0.72rem", fontWeight: 800, mt: 0.1 }}>{idx + 1}</Box>
+                                  <Typography fontSize="0.9rem" color="#374151" lineHeight={1.6}>{typeof s === "string" ? s : s.text}</Typography>
+                                </Box>
+                              ))}
+                            </Box>
+                          </Grid>
+                        </Grid>
+                        {recipeByName.nutrition && (
+                          <Box mt={3} pt={3} sx={{ borderTop: "1px solid #f3f4f6" }}>
+                            <Typography fontWeight={800} mb={1.5} color="#1a1a1a">📊 Nutrition (per serving)</Typography>
+                            <Box display="flex" gap={1.5} flexWrap="wrap">
+                              {[
+                                { label: "Calories", val: recipeByName.nutrition.calories, bg: "#fff7ed", border: "#fed7aa", color: "#c2410c" },
+                                { label: "Protein",  val: recipeByName.nutrition.protein,  bg: "#f0fdf4", border: "#86efac", color: "#15803d" },
+                                { label: "Carbs",    val: recipeByName.nutrition.carbs,    bg: "#eff6ff", border: "#93c5fd", color: "#1d4ed8" },
+                                { label: "Fat",      val: recipeByName.nutrition.fat,      bg: "#fdf4ff", border: "#d8b4fe", color: "#7e22ce" },
+                              ].filter(n => n.val).map((n, i) => (
+                                <Box key={i} sx={{ background: n.bg, border: `1px solid ${n.border}`, borderRadius: 2, px: 2, py: 1, textAlign: "center", minWidth: 80 }}>
+                                  <Typography fontWeight={800} fontSize="1rem" color={n.color}>{n.val}</Typography>
+                                  <Typography variant="caption" color="text.secondary">{n.label}</Typography>
+                                </Box>
+                              ))}
+                            </Box>
+                          </Box>
                         )}
                       </Box>
                     </Box>
-                    {/* ── Audio Player ── */}
-                    <RecipeAudioPlayer recipe={recipeByName} language={language} />
+                  )}
+                </Box>
+              )}
 
-                    <Box mb={3} p={2} sx={{ background: "#fff7ed", borderRadius: 2, border: "1px solid #fed7aa" }}>
-                      <Typography fontWeight={800} fontSize="0.8rem" color="#c2410c" mb={0.5} sx={{ textTransform: "uppercase", letterSpacing: "0.06em" }}>Overview</Typography>
-                      <Typography color="#374151" fontSize="0.92rem" lineHeight={1.6}>{recipeByName.overview}</Typography>
+              {/* ══ TAB 2: By Nutrition ══ */}
+              {recipeTab === 2 && (
+                <Box>
+                  <Box sx={{ background: "linear-gradient(135deg, #f0fdf4 0%, #fff 60%)", borderRadius: 4, border: "1.5px solid #86efac", boxShadow: "0 4px 24px rgba(34,197,94,0.08)", overflow: "hidden", mb: 3 }}>
+                    <Box sx={{ background: "linear-gradient(135deg, #052e16, #14532d)", px: 3, py: 2.5, display: "flex", alignItems: "center", gap: 2 }}>
+                      <Box sx={{ width: 38, height: 38, borderRadius: 2, background: "rgba(34,197,94,0.25)", border: "1px solid rgba(34,197,94,0.4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1.2rem", flexShrink: 0 }}>📊</Box>
+                      <Box>
+                        <Typography sx={{ fontWeight: 800, color: "#fff", fontSize: "1rem", lineHeight: 1.2 }}>Generate by Nutrition Targets</Typography>
+                        <Typography sx={{ color: "rgba(255,255,255,0.45)", fontSize: "0.78rem", mt: 0.2 }}>
+                          Set your macro goals — AI finds recipes that match. Enter any combination of targets.
+                        </Typography>
+                      </Box>
                     </Box>
-                    <Grid container spacing={3}>
-                      <Grid item xs={12} md={5}>
-                        <Typography variant="h6" fontWeight={800} mb={1.5} color="#1a1a1a">🧂 Ingredients</Typography>
-                        <Box component="ul" sx={{ pl: 2, m: 0 }}>
-                          {recipeByName.ingredients?.main?.map((ing, idx) => (
-                            <Box component="li" key={idx} sx={{ mb: 0.8 }}>
-                              <Typography fontSize="0.9rem" color="#374151">
-                                <Box component="span" fontWeight={600}>{ing.quantity}</Box> {ing.name}
-                              </Typography>
-                            </Box>
+                    <Box p={3}>
+                      {totalFilters > 0 && (
+                        <Box mb={2.5} px={2} py={1.2} sx={{ background: "#f0fdf4", borderRadius: 2, border: "1px solid #86efac", display: "flex", alignItems: "center", gap: 1, flexWrap: "wrap" }}>
+                          <Typography variant="caption" sx={{ fontWeight: 700, color: "#15803d", mr: 0.5 }}>🎯 Active filters will be applied:</Typography>
+                          {[...activeCuisine, ...activeFoodTypes, ...activeDiet, ...(activeDifficulty ? [activeDifficulty] : [])].map(f => (
+                            <Chip key={f} label={f} size="small" sx={{ background: "#dcfce7", color: "#15803d", border: "1px solid #86efac", fontWeight: 600, fontSize: "0.7rem", height: 20 }} />
                           ))}
                         </Box>
-                      </Grid>
-                      <Grid item xs={12} md={7}>
-                        <Typography variant="h6" fontWeight={800} mb={1.5} color="#1a1a1a">👨‍🍳 Instructions</Typography>
-                        <Box>
-                          {recipeByName.steps?.map((s, idx) => (
-                            <Box key={idx} display="flex" gap={1.5} mb={1.5}>
-                              <Box sx={{ width: 26, height: 26, borderRadius: "50%", flexShrink: 0, background: "linear-gradient(135deg, #f97316, #ef4444)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: "0.72rem", fontWeight: 800, mt: 0.1 }}>{idx + 1}</Box>
-                              <Typography fontSize="0.9rem" color="#374151" lineHeight={1.6}>{typeof s === "string" ? s : s.text}</Typography>
+                      )}
+
+                      {/* Nutrition target inputs */}
+                      <Grid container spacing={2} mb={3}>
+                        {[
+                          { key: "calories", label: "Calories", unit: "kcal", icon: "🔥", color: "#c2410c", bg: "#fff7ed", border: "#fed7aa", placeholder: "e.g. 500" },
+                          { key: "protein",  label: "Protein",  unit: "g",    icon: "💪", color: "#15803d", bg: "#f0fdf4", border: "#86efac", placeholder: "e.g. 30" },
+                          { key: "carbs",    label: "Carbs",    unit: "g",    icon: "🌾", color: "#1d4ed8", bg: "#eff6ff", border: "#93c5fd", placeholder: "e.g. 60" },
+                          { key: "fat",      label: "Fat",      unit: "g",    icon: "🥑", color: "#7e22ce", bg: "#fdf4ff", border: "#d8b4fe", placeholder: "e.g. 15" },
+                        ].map(field => (
+                          <Grid item xs={6} sm={3} key={field.key}>
+                            <Box sx={{ background: field.bg, border: `1.5px solid ${field.border}`, borderRadius: 3, p: 2, textAlign: "center" }}>
+                              <Typography fontSize="1.5rem" mb={0.5}>{field.icon}</Typography>
+                              <Typography fontWeight={800} fontSize="0.82rem" color={field.color} mb={1}>{field.label}</Typography>
+                              <TextField
+                                value={nutritionTargets[field.key]}
+                                onChange={e => setNutritionTargets(prev => ({ ...prev, [field.key]: e.target.value }))}
+                                onKeyDown={e => e.key === "Enter" && generateByNutrition()}
+                                placeholder={field.placeholder}
+                                size="small"
+                                type="number"
+                                inputProps={{ min: 0, step: 1 }}
+                                sx={{ "& .MuiOutlinedInput-root": { background: "#fff", borderRadius: 2, textAlign: "center" }, "& input": { textAlign: "center", fontWeight: 700, fontSize: "1rem", color: field.color } }}
+                              />
+                              <Typography variant="caption" color="text.secondary" mt={0.5} display="block">{field.unit} per serving</Typography>
                             </Box>
-                          ))}
-                        </Box>
+                          </Grid>
+                        ))}
                       </Grid>
-                    </Grid>
-                    {recipeByName.nutrition && (
-                      <Box mt={3} pt={3} sx={{ borderTop: "1px solid #f3f4f6" }}>
-                        <Typography fontWeight={800} mb={1.5} color="#1a1a1a">📊 Nutrition (per serving)</Typography>
-                        <Box display="flex" gap={1.5} flexWrap="wrap">
+
+                      {/* Quick presets */}
+                      <Box mb={3}>
+                        <Typography variant="caption" fontWeight={700} color="#6b7280" sx={{ textTransform: "uppercase", letterSpacing: "0.08em", fontSize: "0.65rem" }}>Quick Presets</Typography>
+                        <Box display="flex" flexWrap="wrap" gap={1} mt={1}>
                           {[
-                            { label: "Calories", val: recipeByName.nutrition.calories, bg: "#fff7ed", border: "#fed7aa", color: "#c2410c" },
-                            { label: "Protein",  val: recipeByName.nutrition.protein,  bg: "#f0fdf4", border: "#86efac", color: "#15803d" },
-                            { label: "Carbs",    val: recipeByName.nutrition.carbs,    bg: "#eff6ff", border: "#93c5fd", color: "#1d4ed8" },
-                            { label: "Fat",      val: recipeByName.nutrition.fat,      bg: "#fdf4ff", border: "#d8b4fe", color: "#7e22ce" },
-                          ].filter(n => n.val).map((n, i) => (
-                            <Box key={i} sx={{ background: n.bg, border: `1px solid ${n.border}`, borderRadius: 2, px: 2, py: 1, textAlign: "center", minWidth: 80 }}>
-                              <Typography fontWeight={800} fontSize="1rem" color={n.color}>{n.val}</Typography>
-                              <Typography variant="caption" color="text.secondary">{n.label}</Typography>
-                            </Box>
+                            { label: "High Protein",    values: { calories: "400", protein: "40", carbs: "30", fat: "12" } },
+                            { label: "Low Carb / Keto", values: { calories: "450", protein: "30", carbs: "10", fat: "35" } },
+                            { label: "Balanced Meal",   values: { calories: "500", protein: "25", carbs: "55", fat: "15" } },
+                            { label: "Light & Lean",    values: { calories: "300", protein: "20", carbs: "35", fat: "8"  } },
+                            { label: "Bulking",         values: { calories: "700", protein: "50", carbs: "80", fat: "20" } },
+                          ].map(preset => (
+                            <Box key={preset.label} onClick={() => setNutritionTargets(preset.values)} sx={{
+                              px: 1.6, py: 0.5, borderRadius: "20px", cursor: "pointer",
+                              background: JSON.stringify(nutritionTargets) === JSON.stringify(preset.values) ? "#f0fdf4" : "#f9fafb",
+                              border: `1px solid ${JSON.stringify(nutritionTargets) === JSON.stringify(preset.values) ? "#22c55e" : "#e5e7eb"}`,
+                              color: JSON.stringify(nutritionTargets) === JSON.stringify(preset.values) ? "#15803d" : "#6b7280",
+                              fontSize: "0.78rem", fontWeight: 600, transition: "all 0.15s",
+                              "&:hover": { borderColor: "#22c55e", color: "#15803d", background: "#f0fdf4" },
+                            }}>{preset.label}</Box>
                           ))}
                         </Box>
                       </Box>
-                    )}
+
+                      <Button variant="contained" fullWidth size="large"
+                        onClick={generateByNutrition}
+                        disabled={nutritionLoading || (!nutritionTargets.calories && !nutritionTargets.protein && !nutritionTargets.carbs && !nutritionTargets.fat)}
+                        sx={{ background: "linear-gradient(135deg, #22c55e, #16a34a)", borderRadius: 3, py: 1.6, fontSize: "1rem", fontWeight: 800, boxShadow: "0 4px 20px rgba(34,197,94,0.3)", "&:hover": { boxShadow: "0 6px 28px rgba(34,197,94,0.45)" } }}>
+                        {nutritionLoading
+                          ? <Box display="flex" alignItems="center" gap={1.5}><CircularProgress size={20} sx={{ color: "#fff" }} /><span>Finding matching recipes…</span></Box>
+                          : "📊 Find Matching Recipes"}
+                      </Button>
+                    </Box>
                   </Box>
+
+                  <div id="nutrition-anchor" />
+
+                  {/* Nutrition results */}
+                  {nutritionLoading && (
+                    <Grid container spacing={2.5}>{[1,2,3,4].map(i => <Grid item xs={12} sm={6} key={i}><SkeletonCard /></Grid>)}</Grid>
+                  )}
+
+                  {!nutritionLoading && nutritionRecipes.length > 0 && (
+                    <>
+                      <Box mb={2} display="flex" alignItems="center" gap={1.5}>
+                        <Typography fontWeight={800} fontSize="1.1rem" color="#15803d">✅ {nutritionRecipes.length} Matching Recipes Found</Typography>
+                        <Typography variant="caption" color="text.secondary">sorted by best macro match</Typography>
+                      </Box>
+                      <Grid container spacing={2.5}>
+                        {nutritionRecipes.map((r, i) => (
+                          <Grid item xs={12} sm={6} key={i}>
+                            <Card sx={{ ...cardSx, "&:hover": { borderColor: "#86efac", boxShadow: "0 8px 24px rgba(34,197,94,0.14)" } }}>
+                              <Box onClick={() => fetchDetails(r.title)}>
+                                <Box sx={{ position: "relative", height: 160, overflow: "hidden" }}>
+                                  <RecipeImage title={r.title} height={160} />
+                                  <Box sx={{ ...badgeSx("rgba(34,197,94,0.92)") }}>📊 NUTRITION MATCH</Box>
+                                </Box>
+                                <CardContent sx={{ p: 2, pb: 1 }}>
+                                  <Typography fontWeight={700} fontSize="0.93rem" color="#1a1a1a" mb={0.3}>{r.title}</Typography>
+                                  <Typography variant="body2" color="text.secondary" fontSize="0.82rem" mb={1.5}>{r.preview}</Typography>
+                                  {/* Macro chips */}
+                                  <Box display="flex" flexWrap="wrap" gap={0.7} mb={1}>
+                                    {r.calories && <Chip label={`🔥 ${r.calories} kcal`} size="small" sx={{ background: "#fff7ed", color: "#c2410c", border: "1px solid #fed7aa", fontWeight: 700, fontSize: "0.7rem", height: 22 }} />}
+                                    {r.protein_g && <Chip label={`💪 ${r.protein_g}g protein`} size="small" sx={{ background: "#f0fdf4", color: "#15803d", border: "1px solid #86efac", fontWeight: 700, fontSize: "0.7rem", height: 22 }} />}
+                                    {r.carbs_g && <Chip label={`🌾 ${r.carbs_g}g carbs`} size="small" sx={{ background: "#eff6ff", color: "#1d4ed8", border: "1px solid #93c5fd", fontWeight: 700, fontSize: "0.7rem", height: 22 }} />}
+                                    {r.fat_g && <Chip label={`🥑 ${r.fat_g}g fat`} size="small" sx={{ background: "#fdf4ff", color: "#7e22ce", border: "1px solid #d8b4fe", fontWeight: 700, fontSize: "0.7rem", height: 22 }} />}
+                                  </Box>
+                                  {r.match_note && (
+                                    <Box px={1.5} py={0.8} sx={{ background: "#f0fdf4", borderRadius: 1.5, border: "1px solid #bbf7d0" }}>
+                                      <Typography fontSize="0.75rem" color="#15803d" fontWeight={600}>✓ {r.match_note}</Typography>
+                                    </Box>
+                                  )}
+                                </CardContent>
+                              </Box>
+                              <Box px={2} pb={1.5} display="flex" alignItems="center" justifyContent="space-between" onClick={e => e.stopPropagation()}>
+                                <StarRating value={recipeRatings[r.title] || 0} onChange={(v) => setRating(r.title, v)} size={16} />
+                                {(recipeRatings[r.title] || 0) > 0 && <Typography variant="caption" color="#f59e0b" fontWeight={700} fontSize="0.65rem">{recipeRatings[r.title]}/5 ⭐</Typography>}
+                              </Box>
+                            </Card>
+                          </Grid>
+                        ))}
+                      </Grid>
+                    </>
+                  )}
                 </Box>
               )}
+
             </Box>
           </Box>
         )}
-
         {/* ══ MEAL PLANNER ══ */}
         {page === "planner" && (
           <Box sx={{ minHeight: "100vh", background: "linear-gradient(160deg, #f0f9ff 0%, #e0f2fe 45%, #f0f9ff 100%)", position: "relative", overflow: "hidden" }}>
