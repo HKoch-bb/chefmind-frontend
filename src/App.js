@@ -42,6 +42,8 @@ import CameraAltIcon from "@mui/icons-material/CameraAlt";
 import VolumeUpIcon from "@mui/icons-material/VolumeUp";
 import StopIcon from "@mui/icons-material/Stop";
 import GraphicEqIcon from "@mui/icons-material/GraphicEq";
+import HistoryIcon from "@mui/icons-material/History";
+import AutorenewIcon from "@mui/icons-material/Autorenew";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -744,7 +746,7 @@ const IngredientChips = ({ items, onRemove }) => (
 );
 
 // ─── MealPlanGrid ─────────────────────────────────────────────────────────────
-const MealPlanGrid = ({ plan, onViewRecipe, recipeRatings = {}, onRate }) => {
+const MealPlanGrid = ({ plan, onViewRecipe, recipeRatings = {}, onRate, onSwap, swapping = {} }) => {
   if (!plan || plan.length === 0) return null;
   return (
     <Box mt={3}>
@@ -763,25 +765,40 @@ const MealPlanGrid = ({ plan, onViewRecipe, recipeRatings = {}, onRate }) => {
               {MEALS.map((meal, mi) => {
                 const entry = dayObj.meals?.[meal];
                 const rating = entry?.name ? (recipeRatings[entry.name] || 0) : 0;
+                const swapKey = `${dayObj.day}-${meal}`;
+                const isSwapping = swapping[swapKey];
                 return (
                   <Grid item xs={12} sm={6} md={3} key={meal}>
                     <Box sx={{
                       p: 2,
                       borderRight: mi < 3 ? `1px solid ${colors.border}` : "none",
                       borderBottom: { xs: `1px solid ${colors.border}`, md: "none" },
-                      minHeight: 120,
+                      minHeight: 130,
                       display: "flex", flexDirection: "column",
                     }}>
-                      <Typography variant="caption" sx={{ fontWeight: 800, color: colors.accent, textTransform: "uppercase", letterSpacing: "0.07em", fontSize: "0.65rem" }}>
-                        {meal}
-                      </Typography>
+                      <Box display="flex" alignItems="center" justifyContent="space-between" mb={0.3}>
+                        <Typography variant="caption" sx={{ fontWeight: 800, color: colors.accent, textTransform: "uppercase", letterSpacing: "0.07em", fontSize: "0.65rem" }}>
+                          {meal}
+                        </Typography>
+                        {onSwap && (
+                          <Tooltip title={`Swap ${meal}`} arrow>
+                            <IconButton size="small" onClick={e => { e.stopPropagation(); onSwap(dayObj.day, meal); }}
+                              disabled={isSwapping}
+                              sx={{ p: 0.3, color: colors.accent, opacity: 0.7, "&:hover": { opacity: 1, background: `${colors.border}` } }}>
+                              {isSwapping
+                                ? <CircularProgress size={12} sx={{ color: colors.accent }} />
+                                : <AutorenewIcon sx={{ fontSize: 14 }} />}
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                      </Box>
                       {entry?.name ? (
                         <>
                           <Box
                             onClick={() => onViewRecipe(entry.name)}
                             sx={{ cursor: "pointer", flex: 1, "&:hover .view-link": { opacity: 1 } }}
                           >
-                            <Typography fontWeight={700} fontSize="0.88rem" color="#1a1a1a" mt={0.5} lineHeight={1.3}>
+                            <Typography fontWeight={700} fontSize="0.88rem" color="#1a1a1a" mt={0.3} lineHeight={1.3}>
                               {entry.name}
                             </Typography>
                             {entry.note && (
@@ -793,7 +810,6 @@ const MealPlanGrid = ({ plan, onViewRecipe, recipeRatings = {}, onRate }) => {
                               View recipe →
                             </Typography>
                           </Box>
-                          {/* Inline star rating */}
                           <Box mt={0.8} onClick={e => e.stopPropagation()}>
                             <StarRating
                               value={rating}
@@ -1848,9 +1864,22 @@ export default function App() {
   const [recipeTab, setRecipeTab] = useState(0);
 
   // ── Nutrition-based recipe state ──
-  const [nutritionTargets, setNutritionTargets] = useState({ calories: "", protein: "", carbs: "", fat: "" });
+  const [nutritionTargets, setNutritionTargets] = useState({ calories: "", protein: "", carbs: "", fat: "", fiber: "" });
   const [nutritionRecipes, setNutritionRecipes] = useState([]);
   const [nutritionLoading, setNutritionLoading] = useState(false);
+
+  // ── Recipe History (recently viewed) ──
+  const [recipeHistory, setRecipeHistory] = useState(() =>
+    JSON.parse(localStorage.getItem("recipeHistory") || "[]")
+  );
+  const [historyOpen, setHistoryOpen] = useState(false);
+
+  // ── Calorie Budget Planner ──
+  const [calorieBudget, setCalorieBudget] = useState("");
+  const [budgetEnabled, setBudgetEnabled] = useState(false);
+
+  // ── Meal Swap ──
+  const [swapping, setSwapping] = useState({}); // { "Monday-Breakfast": true }
 
   // ── Meal Planner state ──
   const [mpTab, setMpTab] = useState(0);
@@ -1942,6 +1971,9 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("recipeNotes", JSON.stringify(recipeNotes));
   }, [recipeNotes]);
+  useEffect(() => {
+    localStorage.setItem("recipeHistory", JSON.stringify(recipeHistory));
+  }, [recipeHistory]);
 
   // ── Helpers ──
   const addIngredient = useCallback(() => {
@@ -1997,8 +2029,8 @@ export default function App() {
   };
 
   const generateByNutrition = async () => {
-    const { calories, protein, carbs, fat } = nutritionTargets;
-    if (!calories && !protein && !carbs && !fat) return showToast("Enter at least one nutrition target", "error");
+    const { calories, protein, carbs, fat, fiber } = nutritionTargets;
+    if (!calories && !protein && !carbs && !fat && !fiber) return showToast("Enter at least one nutrition target", "error");
     setNutritionLoading(true); setNutritionRecipes([]);
     try {
       const res = await axios.post(`${API}/generate-by-nutrition`, {
@@ -2010,6 +2042,26 @@ export default function App() {
       setTimeout(() => document.getElementById("nutrition-anchor")?.scrollIntoView({ behavior: "smooth" }), 150);
     } catch { showToast("Error generating nutrition-based recipes", "error"); }
     setNutritionLoading(false);
+  };
+
+  const swapMeal = async (plan, setPlan, day, mealType, filters, ingredients = []) => {
+    const key = `${day}-${mealType}`;
+    setSwapping(prev => ({ ...prev, [key]: true }));
+    const currentMeal = plan.find(d => d.day === day)?.meals?.[mealType]?.name || "";
+    try {
+      const res = await axios.post(`${API}/swap-meal`, {
+        day, mealType, currentMeal, ingredients, filters, language,
+      });
+      const { name, note } = res.data;
+      setPlan(prev => prev.map(d =>
+        d.day !== day ? d : {
+          ...d,
+          meals: { ...d.meals, [mealType]: { name, note } },
+        }
+      ));
+      showToast(`Swapped ${mealType} on ${day} → ${name}`, "success");
+    } catch { showToast("Swap failed — try again", "error"); }
+    setSwapping(prev => ({ ...prev, [key]: false }));
   };
 
   const generatePantryPlan = async () => {
@@ -2049,6 +2101,13 @@ export default function App() {
   // ── Recipe details ──
   const fetchDetails = async (title) => {
     setOpen(true); setServingMultiplier(1);
+    // Track in history
+    setRecipeHistory(prev => {
+      const filtered = prev.filter(h => h.title !== title);
+      const newEntry = { title, viewedAt: new Date().toISOString() };
+      const updated = [newEntry, ...filtered].slice(0, 50);
+      return updated;
+    });
     if (recipeCache[title]) { setDetails(recipeCache[title]); return; }
     setDetails(null); setDetailsLoading(true);
     try {
@@ -2560,6 +2619,7 @@ const exportRecipePDF = (recipe, servingMult = 1) => {
     { muiIcon: <InventoryIcon sx={{ fontSize: 20 }} />, label: "My Pantry", key: "pantry" },
     { muiIcon: <BookmarkIcon sx={{ fontSize: 20 }} />, label: "Saved Recipes", key: "saved" },
     { muiIcon: <StarIcon sx={{ fontSize: 20 }} />, label: "Top Rated Recipes", key: "toprated" },
+    { muiIcon: <HistoryIcon sx={{ fontSize: 20 }} />, label: "Recipe History", key: "history" },
   ];
 
   return (
@@ -2602,6 +2662,73 @@ const exportRecipePDF = (recipe, servingMult = 1) => {
         language={language}
         onClose={() => setCookModeOpen(false)}
       />
+
+      {/* ── Recipe History Drawer ── */}
+      <Drawer
+        anchor="right"
+        open={historyOpen}
+        onClose={() => setHistoryOpen(false)}
+        PaperProps={{ sx: { width: 340, background: "#0f0a08", display: "flex", flexDirection: "column" } }}
+      >
+        <Box sx={{ px: 3, py: 2.5, background: "linear-gradient(135deg, #1c0a02, #3b1208)", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
+          <Box display="flex" alignItems="center" gap={1.5}>
+            <HistoryIcon sx={{ color: "#f97316", fontSize: 22 }} />
+            <Box>
+              <Typography fontWeight={800} color="#fff" fontSize="1rem">Recently Viewed</Typography>
+              <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.4)" }}>{recipeHistory.length} recipes</Typography>
+            </Box>
+          </Box>
+          <Box display="flex" gap={1} alignItems="center">
+            {recipeHistory.length > 0 && (
+              <Button size="small" onClick={() => { setRecipeHistory([]); localStorage.removeItem("recipeHistory"); }}
+                sx={{ color: "#9ca3af", fontSize: "0.72rem", minWidth: 0 }}>Clear</Button>
+            )}
+            <IconButton size="small" onClick={() => setHistoryOpen(false)} sx={{ color: "rgba(255,255,255,0.5)" }}>
+              <CloseIcon sx={{ fontSize: 18 }} />
+            </IconButton>
+          </Box>
+        </Box>
+
+        <Box sx={{ flex: 1, overflowY: "auto", p: 2 }}>
+          {recipeHistory.length === 0 ? (
+            <Box textAlign="center" py={8}>
+              <Typography fontSize="2.5rem" mb={1}>🍳</Typography>
+              <Typography fontWeight={600} color="#6b7280" fontSize="0.9rem">No history yet</Typography>
+              <Typography variant="caption" color="#4b5563">View any recipe and it'll appear here</Typography>
+            </Box>
+          ) : (
+            recipeHistory.map((item, i) => {
+              const timeAgo = (() => {
+                const diff = Date.now() - new Date(item.viewedAt).getTime();
+                const mins = Math.floor(diff / 60000);
+                if (mins < 1) return "just now";
+                if (mins < 60) return `${mins}m ago`;
+                const hrs = Math.floor(mins / 60);
+                if (hrs < 24) return `${hrs}h ago`;
+                return `${Math.floor(hrs / 24)}d ago`;
+              })();
+              return (
+                <Box key={i}
+                  onClick={() => { fetchDetails(item.title); setHistoryOpen(false); }}
+                  sx={{
+                    display: "flex", alignItems: "center", gap: 1.5,
+                    px: 2, py: 1.5, mb: 0.8, borderRadius: 2, cursor: "pointer",
+                    background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)",
+                    transition: "all 0.15s",
+                    "&:hover": { background: "rgba(249,115,22,0.12)", borderColor: "rgba(249,115,22,0.3)" },
+                  }}>
+                  <Box sx={{ width: 36, height: 36, borderRadius: 1.5, background: "rgba(249,115,22,0.15)", border: "1px solid rgba(249,115,22,0.3)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", flexShrink: 0 }}>🍽️</Box>
+                  <Box flex={1} minWidth={0}>
+                    <Typography fontWeight={700} color="#fff" fontSize="0.85rem" sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.title}</Typography>
+                    <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.35)" }}>{timeAgo}</Typography>
+                  </Box>
+                  <ChevronRightIcon sx={{ color: "rgba(255,255,255,0.2)", fontSize: 16, flexShrink: 0 }} />
+                </Box>
+              );
+            })
+          )}
+        </Box>
+      </Drawer>
 
       {/* ── SIDEBAR ── */}
       <Box sx={{
@@ -2700,7 +2827,7 @@ const exportRecipePDF = (recipe, servingMult = 1) => {
 
         {savedRecipes.length > 0 && (
           <Box sx={{
-            mx: sidebarOpen ? 1.5 : 1, mb: 2.5, flexShrink: 0,
+            mx: sidebarOpen ? 1.5 : 1, mb: 1, flexShrink: 0,
             p: sidebarOpen ? 1.5 : 1,
             background: "rgba(239,68,68,0.12)", borderRadius: 2,
             border: "1px solid rgba(239,68,68,0.2)",
@@ -2712,6 +2839,25 @@ const exportRecipePDF = (recipe, servingMult = 1) => {
             {sidebarOpen && (
               <Typography variant="caption" sx={{ color: "#fca5a5", fontWeight: 700, whiteSpace: "nowrap" }}>
                 {savedRecipes.length} saved recipe{savedRecipes.length !== 1 ? "s" : ""}
+              </Typography>
+            )}
+          </Box>
+        )}
+        {recipeHistory.length > 0 && (
+          <Box onClick={() => setHistoryOpen(true)} sx={{
+            mx: sidebarOpen ? 1.5 : 1, mb: 2.5, flexShrink: 0,
+            p: sidebarOpen ? 1.5 : 1,
+            background: "rgba(249,115,22,0.1)", borderRadius: 2,
+            border: "1px solid rgba(249,115,22,0.2)",
+            display: "flex", alignItems: "center",
+            justifyContent: sidebarOpen ? "flex-start" : "center",
+            gap: 1, overflow: "hidden", cursor: "pointer",
+            "&:hover": { background: "rgba(249,115,22,0.2)" },
+          }}>
+            <HistoryIcon sx={{ fontSize: sidebarOpen ? "0.9rem" : "1rem", color: "#f97316", flexShrink: 0 }} />
+            {sidebarOpen && (
+              <Typography variant="caption" sx={{ color: "#fdba74", fontWeight: 700, whiteSpace: "nowrap" }}>
+                {recipeHistory.length} recently viewed
               </Typography>
             )}
           </Box>
@@ -3281,8 +3427,9 @@ const exportRecipePDF = (recipe, servingMult = 1) => {
                           { key: "protein",  label: "Protein",  unit: "g",    icon: "💪", color: "#15803d", bg: "#f0fdf4", border: "#86efac", placeholder: "e.g. 30" },
                           { key: "carbs",    label: "Carbs",    unit: "g",    icon: "🌾", color: "#1d4ed8", bg: "#eff6ff", border: "#93c5fd", placeholder: "e.g. 60" },
                           { key: "fat",      label: "Fat",      unit: "g",    icon: "🥑", color: "#7e22ce", bg: "#fdf4ff", border: "#d8b4fe", placeholder: "e.g. 15" },
+                          { key: "fiber",    label: "Fiber",    unit: "g",    icon: "🥦", color: "#0f766e", bg: "#f0fdfa", border: "#99f6e4", placeholder: "e.g. 8"  },
                         ].map(field => (
-                          <Grid item xs={6} sm={3} key={field.key}>
+                          <Grid item xs={6} sm={4} md={2.4} key={field.key}>
                             <Box sx={{ background: field.bg, border: `1.5px solid ${field.border}`, borderRadius: 3, p: 2, textAlign: "center" }}>
                               <Typography fontSize="1.5rem" mb={0.5}>{field.icon}</Typography>
                               <Typography fontWeight={800} fontSize="0.82rem" color={field.color} mb={1}>{field.label}</Typography>
@@ -3294,7 +3441,7 @@ const exportRecipePDF = (recipe, servingMult = 1) => {
                                 size="small"
                                 type="number"
                                 inputProps={{ min: 0, step: 1 }}
-                                sx={{ "& .MuiOutlinedInput-root": { background: "#fff", borderRadius: 2, textAlign: "center" }, "& input": { textAlign: "center", fontWeight: 700, fontSize: "1rem", color: field.color } }}
+                                sx={{ "& .MuiOutlinedInput-root": { background: "#fff", borderRadius: 2 }, "& input": { textAlign: "center", fontWeight: 700, fontSize: "1rem", color: field.color } }}
                               />
                               <Typography variant="caption" color="text.secondary" mt={0.5} display="block">{field.unit} per serving</Typography>
                             </Box>
@@ -3307,11 +3454,11 @@ const exportRecipePDF = (recipe, servingMult = 1) => {
                         <Typography variant="caption" fontWeight={700} color="#6b7280" sx={{ textTransform: "uppercase", letterSpacing: "0.08em", fontSize: "0.65rem" }}>Quick Presets</Typography>
                         <Box display="flex" flexWrap="wrap" gap={1} mt={1}>
                           {[
-                            { label: "High Protein",    values: { calories: "400", protein: "40", carbs: "30", fat: "12" } },
-                            { label: "Low Carb / Keto", values: { calories: "450", protein: "30", carbs: "10", fat: "35" } },
-                            { label: "Balanced Meal",   values: { calories: "500", protein: "25", carbs: "55", fat: "15" } },
-                            { label: "Light & Lean",    values: { calories: "300", protein: "20", carbs: "35", fat: "8"  } },
-                            { label: "Bulking",         values: { calories: "700", protein: "50", carbs: "80", fat: "20" } },
+                            { label: "High Protein",    values: { calories: "400", protein: "40", carbs: "30", fat: "12", fiber: "8"  } },
+                            { label: "Low Carb / Keto", values: { calories: "450", protein: "30", carbs: "10", fat: "35", fiber: "5"  } },
+                            { label: "Balanced Meal",   values: { calories: "500", protein: "25", carbs: "55", fat: "15", fiber: "10" } },
+                            { label: "Light & Lean",    values: { calories: "300", protein: "20", carbs: "35", fat: "8",  fiber: "6"  } },
+                            { label: "Bulking",         values: { calories: "700", protein: "50", carbs: "80", fat: "20", fiber: "12" } },
                           ].map(preset => (
                             <Box key={preset.label} onClick={() => setNutritionTargets(preset.values)} sx={{
                               px: 1.6, py: 0.5, borderRadius: "20px", cursor: "pointer",
@@ -3327,7 +3474,7 @@ const exportRecipePDF = (recipe, servingMult = 1) => {
 
                       <Button variant="contained" fullWidth size="large"
                         onClick={generateByNutrition}
-                        disabled={nutritionLoading || (!nutritionTargets.calories && !nutritionTargets.protein && !nutritionTargets.carbs && !nutritionTargets.fat)}
+                        disabled={nutritionLoading || (!nutritionTargets.calories && !nutritionTargets.protein && !nutritionTargets.carbs && !nutritionTargets.fat && !nutritionTargets.fiber)}
                         sx={{ background: "linear-gradient(135deg, #22c55e, #16a34a)", borderRadius: 3, py: 1.6, fontSize: "1rem", fontWeight: 800, boxShadow: "0 4px 20px rgba(34,197,94,0.3)", "&:hover": { boxShadow: "0 6px 28px rgba(34,197,94,0.45)" } }}>
                         {nutritionLoading
                           ? <Box display="flex" alignItems="center" gap={1.5}><CircularProgress size={20} sx={{ color: "#fff" }} /><span>Finding matching recipes…</span></Box>
@@ -3367,6 +3514,7 @@ const exportRecipePDF = (recipe, servingMult = 1) => {
                                     {r.protein_g && <Chip label={`💪 ${r.protein_g}g protein`} size="small" sx={{ background: "#f0fdf4", color: "#15803d", border: "1px solid #86efac", fontWeight: 700, fontSize: "0.7rem", height: 22 }} />}
                                     {r.carbs_g && <Chip label={`🌾 ${r.carbs_g}g carbs`} size="small" sx={{ background: "#eff6ff", color: "#1d4ed8", border: "1px solid #93c5fd", fontWeight: 700, fontSize: "0.7rem", height: 22 }} />}
                                     {r.fat_g && <Chip label={`🥑 ${r.fat_g}g fat`} size="small" sx={{ background: "#fdf4ff", color: "#7e22ce", border: "1px solid #d8b4fe", fontWeight: 700, fontSize: "0.7rem", height: 22 }} />}
+                                    {r.fiber_g && <Chip label={`🥦 ${r.fiber_g}g fiber`} size="small" sx={{ background: "#f0fdfa", color: "#0f766e", border: "1px solid #99f6e4", fontWeight: 700, fontSize: "0.7rem", height: 22 }} />}
                                   </Box>
                                   {r.match_note && (
                                     <Box px={1.5} py={0.8} sx={{ background: "#f0fdf4", borderRadius: 1.5, border: "1px solid #bbf7d0" }}>
@@ -3576,8 +3724,64 @@ const exportRecipePDF = (recipe, servingMult = 1) => {
                     subtitle="applied to all 5 days"
                   />
                   <GenerateBtn onClick={generatePantryPlan} loading={mpPantryLoading} disabled={!mpSelectedPantryIdxs.length} label="🧺 Generate Plan from Selection" />
+                  {/* Calorie Budget */}
+                  <Box sx={{ background: "#fff", borderRadius: 3, border: "1px solid #f3f4f6", p: 2.5, mb: 2, mt: 2 }}>
+                    <Box display="flex" alignItems="center" justifyContent="space-between" flexWrap="wrap" gap={1.5}>
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <Typography fontSize="1rem">🔥</Typography>
+                        <Box>
+                          <Typography fontWeight={700} fontSize="0.9rem" color="#374151">Daily Calorie Budget</Typography>
+                          <Typography variant="caption" color="text.secondary">AI will distribute across all 4 meals</Typography>
+                        </Box>
+                      </Box>
+                      <Box display="flex" alignItems="center" gap={1.5} flexWrap="wrap">
+                        <TextField
+                          value={calorieBudget}
+                          onChange={e => setCalorieBudget(e.target.value)}
+                          placeholder="e.g. 1800"
+                          size="small"
+                          type="number"
+                          inputProps={{ min: 500, max: 5000, step: 100 }}
+                          sx={{ width: 120, "& .MuiOutlinedInput-root": { borderRadius: 2 } }}
+                          InputProps={{ endAdornment: <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>kcal</Typography> }}
+                        />
+                        <Box display="flex" gap={0.8}>
+                          {[1500, 1800, 2000, 2500].map(cal => (
+                            <Box key={cal} onClick={() => setCalorieBudget(String(cal))} sx={{
+                              px: 1.2, py: 0.4, borderRadius: "20px", cursor: "pointer", fontSize: "0.72rem", fontWeight: 700,
+                              background: calorieBudget === String(cal) ? "#fff7ed" : "#f9fafb",
+                              border: `1px solid ${calorieBudget === String(cal) ? "#f97316" : "#e5e7eb"}`,
+                              color: calorieBudget === String(cal) ? "#c2410c" : "#9ca3af",
+                              "&:hover": { borderColor: "#f97316", color: "#c2410c" },
+                            }}>{cal}</Box>
+                          ))}
+                        </Box>
+                      </Box>
+                    </Box>
+                    {calorieBudget && (
+                      <Box mt={1.5} display="flex" flexWrap="wrap" gap={1}>
+                        {[
+                          { label: "Breakfast", pct: 25, color: "#f97316" },
+                          { label: "Lunch",     pct: 35, color: "#22c55e" },
+                          { label: "Dinner",    pct: 30, color: "#3b82f6" },
+                          { label: "Snack",     pct: 10, color: "#a855f7" },
+                        ].map(m => (
+                          <Chip key={m.label} size="small"
+                            label={`${m.label}: ~${Math.round(Number(calorieBudget) * m.pct / 100)} kcal`}
+                            sx={{ background: "#f9fafb", border: `1px solid ${m.color}33`, color: m.color, fontWeight: 700, fontSize: "0.72rem" }}
+                          />
+                        ))}
+                      </Box>
+                    )}
+                  </Box>
                   <div id="pantry-plan-anchor" />
-                  <MealPlanGrid plan={mpPantryPlan} onViewRecipe={fetchDetails} recipeRatings={recipeRatings} onRate={setRating} />
+                  <MealPlanGrid plan={mpPantryPlan} onViewRecipe={fetchDetails} recipeRatings={recipeRatings} onRate={setRating}
+                    onSwap={(day, meal) => swapMeal(mpPantryPlan, setMpPantryPlan, day, meal,
+                      { cuisine: mpPantryCuisine, foodTypes: mpPantryFoodTypes, diet: mpPantryDiet, difficulty: mpPantryDifficulty },
+                      mpSelectedPantryIdxs.map(idx => pantryItems[idx]).filter(Boolean)
+                    )}
+                    swapping={swapping}
+                  />
                   {mpPantryPlan.length > 0 && (
                     <>
  <Box mt={3} display="flex" gap={1.5} flexWrap="wrap" alignItems="center">
@@ -3659,7 +3863,13 @@ const exportRecipePDF = (recipe, servingMult = 1) => {
                   />
                   <GenerateBtn onClick={generateGroceryPlan} loading={mpGroceryLoading} disabled={pantryItems.filter(i => i.inStock).length === 0} label="🗄️ Generate Full Pantry Plan" />
                   <div id="grocery-plan-anchor" />
-                  <MealPlanGrid plan={mpGroceryPlan} onViewRecipe={fetchDetails} recipeRatings={recipeRatings} onRate={setRating} />
+                  <MealPlanGrid plan={mpGroceryPlan} onViewRecipe={fetchDetails} recipeRatings={recipeRatings} onRate={setRating}
+                    onSwap={(day, meal) => swapMeal(mpGroceryPlan, setMpGroceryPlan, day, meal,
+                      { cuisine: mpGroceryCuisine, foodTypes: mpGroceryFoodTypes, diet: mpGroceryDiet, difficulty: mpGroceryDifficulty },
+                      pantryItems.filter(i => i.inStock)
+                    )}
+                    swapping={swapping}
+                  />
                   {mpGroceryPlan.length > 0 && (
                     <>
  <Box mt={3} display="flex" gap={1.5} flexWrap="wrap" alignItems="center">
@@ -4158,6 +4368,100 @@ const exportRecipePDF = (recipe, servingMult = 1) => {
             </Box>
           );
         })()}
+
+        {/* ── RECIPE HISTORY PAGE ── */}
+        {page === "history" && (
+          <Box sx={{ minHeight: "100vh", background: "linear-gradient(160deg, #0f0a08 0%, #1c1208 100%)", position: "relative" }}>
+            <Box sx={{ position: "relative", zIndex: 1, overflow: "hidden", background: "linear-gradient(125deg, #1c0a02 0%, #3b1208 40%, #5c1a0a 70%, #7c2d12 100%)", px: { xs: 4, md: 6 }, py: 4.5 }}>
+              <Box display="flex" alignItems="flex-end" justifyContent="space-between" flexWrap="wrap" gap={2}>
+                <Box>
+                  <Box sx={{ display: "inline-flex", alignItems: "center", gap: 1, background: "rgba(249,115,22,0.2)", border: "1px solid rgba(249,115,22,0.4)", borderRadius: "100px", px: 2, py: 0.5, mb: 2 }}>
+                    <HistoryIcon sx={{ fontSize: 12, color: "#f97316" }} />
+                    <Typography sx={{ color: "#fdba74", fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase" }}>Recently Viewed</Typography>
+                  </Box>
+                  <Typography sx={{ fontWeight: 900, fontSize: { xs: "1.8rem", md: "2.4rem" }, letterSpacing: "-1.5px", color: "#fff", lineHeight: 1.1, mb: 1 }}>🕐 Recipe History</Typography>
+                  <Typography sx={{ color: "rgba(255,255,255,0.5)", fontSize: "0.95rem" }}>
+                    {recipeHistory.length} recipe{recipeHistory.length !== 1 ? "s" : ""} viewed — click any to reopen
+                  </Typography>
+                </Box>
+                {recipeHistory.length > 0 && (
+                  <Button variant="outlined" size="small"
+                    onClick={() => { setRecipeHistory([]); localStorage.removeItem("recipeHistory"); }}
+                    sx={{ borderColor: "rgba(255,255,255,0.2)", color: "rgba(255,255,255,0.5)", borderRadius: 2, fontWeight: 700 }}>
+                    Clear All
+                  </Button>
+                )}
+              </Box>
+            </Box>
+
+            <Box p={4} maxWidth={960} mx="auto">
+              {recipeHistory.length === 0 ? (
+                <Box textAlign="center" py={12}>
+                  <Typography fontSize="3rem" mb={2}>🍳</Typography>
+                  <Typography fontWeight={700} color="#6b7280" fontSize="1rem" mb={1}>No history yet</Typography>
+                  <Typography variant="body2" color="#4b5563" mb={3}>Open any recipe and it will be tracked here automatically</Typography>
+                  <Button variant="contained" onClick={() => setPage("recipes")}
+                    sx={{ background: "linear-gradient(135deg, #ef4444, #f97316)", borderRadius: 2, fontWeight: 700 }}>
+                    Generate Recipes →
+                  </Button>
+                </Box>
+              ) : (
+                <Grid container spacing={2}>
+                  {recipeHistory.map((item, i) => {
+                    const timeAgo = (() => {
+                      const diff = Date.now() - new Date(item.viewedAt).getTime();
+                      const mins = Math.floor(diff / 60000);
+                      if (mins < 1) return "just now";
+                      if (mins < 60) return `${mins}m ago`;
+                      const hrs = Math.floor(mins / 60);
+                      if (hrs < 24) return `${hrs}h ago`;
+                      return `${Math.floor(hrs / 24)}d ago`;
+                    })();
+                    const isSaved = savedRecipes.some(r => r._title === item.title);
+                    return (
+                      <Grid item xs={12} sm={6} md={4} key={i}>
+                        <Card sx={{ borderRadius: 3, overflow: "hidden", border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.04)", cursor: "pointer", transition: "all 0.2s", "&:hover": { background: "rgba(249,115,22,0.1)", borderColor: "rgba(249,115,22,0.3)", transform: "translateY(-3px)" } }}
+                          onClick={() => fetchDetails(item.title)}>
+                          <Box sx={{ position: "relative", height: 140, overflow: "hidden" }}>
+                            <RecipeImage title={item.title} height={140} />
+                            <Box sx={{ position: "absolute", top: 8, right: 8, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)", borderRadius: "8px", px: 1, py: 0.3 }}>
+                              <Typography sx={{ color: "rgba(255,255,255,0.7)", fontSize: "0.65rem", fontWeight: 600 }}>#{i + 1}</Typography>
+                            </Box>
+                            {isSaved && (
+                              <Box sx={{ position: "absolute", top: 8, left: 8, background: "rgba(34,197,94,0.85)", borderRadius: "8px", px: 1, py: 0.3 }}>
+                                <Typography sx={{ color: "#fff", fontSize: "0.62rem", fontWeight: 800 }}>💾 SAVED</Typography>
+                              </Box>
+                            )}
+                          </Box>
+                          <Box p={2}>
+                            <Typography fontWeight={700} color="#fff" fontSize="0.9rem" mb={0.3} sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.title}</Typography>
+                            <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.35)" }}>Viewed {timeAgo}</Typography>
+                          </Box>
+                          <Box px={2} pb={2} display="flex" gap={1}>
+                            <Button size="small" variant="outlined" fullWidth
+                              onClick={e => { e.stopPropagation(); fetchDetails(item.title); }}
+                              sx={{ borderColor: "rgba(249,115,22,0.4)", color: "#f97316", borderRadius: 2, fontSize: "0.75rem", fontWeight: 700 }}>
+                              View Recipe
+                            </Button>
+                            {!isSaved && (
+                              <Tooltip title="Save to cookbook">
+                                <IconButton size="small"
+                                  onClick={e => { e.stopPropagation(); fetchDetails(item.title); setTimeout(() => saveRecipe(), 800); }}
+                                  sx={{ color: "#6b7280", "&:hover": { color: "#22c55e" }, border: "1px solid rgba(255,255,255,0.1)", borderRadius: 2 }}>
+                                  <BookmarkBorderIcon sx={{ fontSize: 16 }} />
+                                </IconButton>
+                              </Tooltip>
+                            )}
+                          </Box>
+                        </Card>
+                      </Grid>
+                    );
+                  })}
+                </Grid>
+              )}
+            </Box>
+          </Box>
+        )}
 
         {/* ── RECIPE DETAILS MODAL ── */}
         <Dialog open={open} onClose={() => { setOpen(false); setDetails(null); window.speechSynthesis?.cancel(); }}
