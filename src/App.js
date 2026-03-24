@@ -2112,166 +2112,375 @@ const exportMealPlanPDF = (plan, title = "Weekly Meal Plan") => {
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
- 
+
   // ── Header bar ──
   doc.setFillColor(239, 68, 68);
   doc.rect(0, 0, pageW, 22, "F");
- 
-  // Logo emoji area
-  doc.setFillColor(220, 40, 40);
+  doc.setFillColor(210, 38, 38);
   doc.roundedRect(10, 4, 14, 14, 3, 3, "F");
-  doc.setFontSize(11);
-  doc.text("🍳", 13.5, 13.5);
- 
-  // App name
+  // Logo text instead of emoji
   doc.setTextColor(255, 255, 255);
-  doc.setFontSize(14);
   doc.setFont("helvetica", "bold");
-  doc.text("ChefMind", 27, 10);
   doc.setFontSize(8);
+  doc.text("CM", 17, 13, { align: "center" });
+  doc.setFontSize(14);
+  doc.text("ChefMind", 27, 10);
   doc.setFont("helvetica", "normal");
+  doc.setFontSize(8);
   doc.text("AI Kitchen Assistant", 27, 16);
- 
-  // Plan title (right-aligned in header)
   doc.setFontSize(12);
   doc.setFont("helvetica", "bold");
   doc.text(title, pageW - 12, 10, { align: "right" });
- 
-  // Generated date
   const today = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   doc.setFontSize(7.5);
   doc.setFont("helvetica", "normal");
   doc.text(`Generated: ${today}`, pageW - 12, 17, { align: "right" });
- 
-  // ── Build table data ──
+
+  // ── Build table ──
   const MEAL_TYPES = ["Breakfast", "Lunch", "Dinner", "Snack"];
-  const days = plan.map(d => d.day);
- 
-  // One row per meal type, one column per day
-  const tableBody = MEAL_TYPES.map(meal => {
-    const row = [
-      {
-        content: meal,
-        styles: {
-          fontStyle: "bold",
-          fillColor: meal === "Breakfast" ? [255, 247, 237]
-            : meal === "Lunch"     ? [240, 253, 244]
-            : meal === "Dinner"    ? [239, 246, 255]
-            :                        [253, 244, 255],
-          textColor: meal === "Breakfast" ? [194, 65, 12]
-            : meal === "Lunch"     ? [21, 128, 61]
-            : meal === "Dinner"    ? [29, 78, 216]
-            :                        [126, 34, 206],
-          halign: "center",
-          valign: "middle",
-          fontSize: 8,
-        },
-      },
-    ];
- 
-    days.forEach(day => {
-      const dayObj = plan.find(d => d.day === day);
-      const entry  = dayObj?.meals?.[meal];
-      const name   = entry?.name  || "—";
-      const note   = entry?.note  || "";
-      row.push({
-        content: note ? `${name}\n${note}` : name,
-        styles:  {
-          fontSize: 8,
-          cellPadding: 3,
-          valign: "top",
-          textColor: [30, 30, 30],
-          fillColor: [255, 255, 255],
-        },
-      });
-    });
-    return row;
-  });
- 
-  // Day-name header row colors
-  const DAY_HEADER_COLORS = {
+  const MEAL_COLORS = {
+    Breakfast: { fill: [255, 247, 237], text: [194, 65, 12] },
+    Lunch:     { fill: [240, 253, 244], text: [21, 128, 61] },
+    Dinner:    { fill: [239, 246, 255], text: [29, 78, 216] },
+    Snack:     { fill: [253, 244, 255], text: [126, 34, 206] },
+  };
+  const DAY_COLORS_PDF = {
     Monday:    [249, 115, 22],
     Tuesday:   [168, 85, 247],
     Wednesday: [59, 130, 246],
     Thursday:  [34, 197, 94],
     Friday:    [239, 68, 68],
   };
- 
+  const days = plan.map(d => d.day);
+
+  const tableBody = MEAL_TYPES.map(meal => {
+    const mc = MEAL_COLORS[meal];
+    const row = [{
+      content: meal,
+      styles: {
+        fontStyle: "bold", fontSize: 8.5,
+        fillColor: mc.fill, textColor: mc.text,
+        halign: "center", valign: "middle",
+      },
+    }];
+    days.forEach(day => {
+      const entry = plan.find(d => d.day === day)?.meals?.[meal];
+      const name  = entry?.name || "—";
+      const note  = entry?.note || "";
+      // Put name on first line bold-ish, note on second line smaller
+      // We use \n to separate; willDrawCell will handle styling
+      row.push({
+        content: note ? `${name}\n${note}` : name,
+        styles: {
+          fontSize: 8, valign: "top", cellPadding: { top: 3, left: 3, right: 3, bottom: 3 },
+          textColor: [30, 30, 30], fillColor: [255, 255, 255],
+          overflow: "linebreak",
+        },
+      });
+    });
+    return row;
+  });
+
   const headRow = [
     { content: "Meal", styles: { fillColor: [30, 30, 30], textColor: [255, 255, 255], halign: "center", fontStyle: "bold", fontSize: 9 } },
     ...days.map(day => ({
       content: day,
-      styles: {
-        fillColor: DAY_HEADER_COLORS[day] || [100, 100, 100],
-        textColor: [255, 255, 255],
-        halign: "center",
-        fontStyle: "bold",
-        fontSize: 9,
-      },
+      styles: { fillColor: DAY_COLORS_PDF[day] || [100, 100, 100], textColor: [255, 255, 255], halign: "center", fontStyle: "bold", fontSize: 9 },
     })),
   ];
- 
-  // Column widths — meal label narrow, days share remaining space equally
-  const usableW   = pageW - 20;
-  const mealColW  = 22;
-  const dayColW   = (usableW - mealColW) / days.length;
+
+  const usableW  = pageW - 20;
+  const mealColW = 24;
+  const dayColW  = (usableW - mealColW) / days.length;
   const colWidths = [mealColW, ...days.map(() => dayColW)];
- 
+
   autoTable(doc, {
     startY: 26,
     head: [headRow],
     body: tableBody,
     columnStyles: colWidths.reduce((acc, w, i) => { acc[i] = { cellWidth: w }; return acc; }, {}),
     styles: {
-      lineColor: [229, 231, 235],
-      lineWidth: 0.3,
+      lineColor: [220, 220, 220],
+      lineWidth: 0.25,
       font: "helvetica",
       cellPadding: 3,
-      minCellHeight: 18,
+      minCellHeight: 20,
+      overflow: "linebreak",
     },
-    headStyles: { minCellHeight: 10 },
-    alternateRowStyles: { fillColor: [249, 250, 251] },
+    headStyles: { minCellHeight: 11 },
+    alternateRowStyles: { fillColor: [250, 250, 250] },
     margin: { left: 10, right: 10 },
-    tableLineColor: [209, 213, 219],
-    tableLineWidth: 0.4,
+    tableLineColor: [200, 200, 200],
+    tableLineWidth: 0.35,
+    // Use willDrawCell to render name bold + note grey without double-drawing
+    willDrawCell: (data) => {
+      if (data.section !== "body" || data.column.index === 0) return;
+      const entry = plan.find(d => d.day === days[data.column.index - 1])?.meals?.[MEAL_TYPES[data.row.index]];
+      if (!entry?.name || !entry?.note) return;
+      // Override the cell content to empty so autoTable draws nothing,
+      // then we draw manually below in didDrawCell
+      data.cell.text = [];
+    },
     didDrawCell: (data) => {
-      // Bold the meal name part when there's a note (first line)
-      if (data.section === "body" && data.column.index > 0) {
-        const entry = plan.find(d => d.day === days[data.column.index - 1])?.meals?.[MEAL_TYPES[data.row.index]];
-        if (entry?.name && entry?.note) {
-          const x = data.cell.x + 3;
-          const y = data.cell.y + 7;
-          doc.setFontSize(8);
-          doc.setFont("helvetica", "bold");
-          doc.setTextColor(30, 30, 30);
-          doc.text(entry.name, x, y);
-          doc.setFont("helvetica", "normal");
-          doc.setFontSize(7);
-          doc.setTextColor(107, 114, 128);
-          doc.text(entry.note, x, y + 5, { maxWidth: data.cell.width - 6 });
-        }
-      }
+      if (data.section !== "body" || data.column.index === 0) return;
+      const entry = plan.find(d => d.day === days[data.column.index - 1])?.meals?.[MEAL_TYPES[data.row.index]];
+      if (!entry?.name || !entry?.note) return;
+      // Now draw name (bold) and note (grey) cleanly
+      const x = data.cell.x + 3;
+      const maxW = data.cell.width - 6;
+      let cy = data.cell.y + 7;
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(30, 30, 30);
+      const nameLines = doc.splitTextToSize(entry.name, maxW);
+      doc.text(nameLines, x, cy);
+      cy += nameLines.length * 4.5 + 1.5;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7);
+      doc.setTextColor(100, 100, 100);
+      const noteLines = doc.splitTextToSize(entry.note, maxW);
+      doc.text(noteLines, x, cy);
     },
   });
- 
+
   // ── Footer ──
   const finalY = doc.lastAutoTable.finalY || pageH - 20;
-  if (finalY < pageH - 16) {
-    doc.setDrawColor(229, 231, 235);
+  if (finalY < pageH - 14) {
+    doc.setDrawColor(220, 220, 220);
     doc.setLineWidth(0.4);
-    doc.line(10, finalY + 6, pageW - 10, finalY + 6);
+    doc.line(10, finalY + 5, pageW - 10, finalY + 5);
     doc.setFontSize(7);
-    doc.setTextColor(156, 163, 175);
+    doc.setTextColor(160, 160, 160);
     doc.setFont("helvetica", "normal");
-    doc.text("Generated by ChefMind AI Kitchen Assistant", 10, finalY + 12);
-    doc.text(`Page 1`, pageW - 10, finalY + 12, { align: "right" });
+    doc.text("Generated by ChefMind AI Kitchen Assistant", 10, finalY + 10);
+    doc.text("Page 1", pageW - 10, finalY + 10, { align: "right" });
   }
- 
-  // ── Save ──
+
   const fileName = `${title.replace(/\s+/g, "_")}_${new Date().toISOString().slice(0, 10)}.pdf`;
   doc.save(fileName);
 };
  
+  // ── Export single recipe as PDF ──
+const exportRecipePDF = (recipe, servingMult = 1) => {
+  if (!recipe) return;
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const pageW   = doc.internal.pageSize.getWidth();
+  const pageH   = doc.internal.pageSize.getHeight();
+  const margin  = 16;
+  const contentW = pageW - margin * 2;
+  let y = 0;
+
+  const checkPage = (needed = 10) => {
+    if (y + needed > pageH - 16) { doc.addPage(); y = 18; }
+  };
+
+  // Header bar
+  doc.setFillColor(239, 68, 68);
+  doc.rect(0, 0, pageW, 26, "F");
+  doc.setFillColor(200, 30, 30);
+  doc.roundedRect(margin, 5, 16, 16, 2, 2, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(9);
+  doc.text("CM", margin + 8, 14.5, { align: "center" });
+  doc.setFontSize(15);
+  doc.text("ChefMind", margin + 20, 12);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(8.5);
+  doc.text("AI Kitchen Assistant", margin + 20, 19);
+  const today = new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" });
+  doc.setFontSize(7.5);
+  doc.text(today, pageW - margin, 15, { align: "right" });
+  y = 34;
+
+  // Recipe title
+  doc.setTextColor(20, 20, 20);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(22);
+  const titleLines = doc.splitTextToSize(recipe._title || recipe.title || "Recipe", contentW);
+  doc.text(titleLines, margin, y);
+  y += titleLines.length * 9 + 2;
+
+  // Orange accent line
+  doc.setDrawColor(249, 115, 22);
+  doc.setLineWidth(1.2);
+  doc.line(margin, y, margin + 36, y);
+  y += 7;
+
+  // Meta pills (no emojis)
+  const metaItems = [
+    recipe.servings  && ("Serves: " + recipe.servings),
+    recipe.prep_time && ("Prep: "   + recipe.prep_time),
+    recipe.cook_time && ("Cook: "   + recipe.cook_time),
+    servingMult > 1  && ("Multiplier: x" + servingMult),
+  ].filter(Boolean);
+  if (metaItems.length) {
+    let px = margin;
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "normal");
+    metaItems.forEach(item => {
+      const tw = doc.getTextWidth(item) + 8;
+      doc.setFillColor(255, 247, 237);
+      doc.setDrawColor(254, 215, 170);
+      doc.setLineWidth(0.4);
+      doc.roundedRect(px, y - 4, tw, 7, 1.5, 1.5, "FD");
+      doc.setTextColor(194, 65, 12);
+      doc.text(item, px + 4, y + 1);
+      px += tw + 3;
+    });
+    y += 10;
+  }
+
+  // Overview box
+  if (recipe.overview) {
+    checkPage(20);
+    const overviewLines = doc.splitTextToSize(recipe.overview, contentW - 8);
+    const boxH = overviewLines.length * 5.2 + 11;
+    doc.setFillColor(255, 247, 237);
+    doc.setDrawColor(254, 215, 170);
+    doc.setLineWidth(0.4);
+    doc.roundedRect(margin, y, contentW, boxH, 2, 2, "FD");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.5);
+    doc.setTextColor(194, 65, 12);
+    doc.text("OVERVIEW", margin + 4, y + 5.5);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor(55, 65, 81);
+    doc.text(overviewLines, margin + 4, y + 11);
+    y += boxH + 7;
+  }
+
+  // Ingredients (two-column)
+  if (recipe.ingredients && recipe.ingredients.main && recipe.ingredients.main.length) {
+    checkPage(16);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(13);
+    doc.setTextColor(20, 20, 20);
+    doc.text("Ingredients", margin, y);
+    y += 7;
+
+    const halfW  = (contentW - 6) / 2;
+    const ings   = recipe.ingredients.main;
+    const mid    = Math.ceil(ings.length / 2);
+    const col1   = ings.slice(0, mid);
+    const col2   = ings.slice(mid);
+    const startY = y;
+
+    const scaleQtyPDF = (qty) => {
+      if (!qty || servingMult === 1) return qty;
+      const match = qty.match(/^([\d./]+)/);
+      if (!match) return qty;
+      try {
+        const num    = eval(match[1]);
+        const scaled = Math.round(num * servingMult * 4) / 4;
+        return qty.replace(match[1], scaled % 1 === 0 ? String(scaled) : scaled.toString());
+      } catch { return qty; }
+    };
+
+    const drawIngCol = (list, xStart) => {
+      let cy = startY;
+      doc.setFontSize(9);
+      list.forEach(ing => {
+        const qty     = scaleQtyPDF(ing.quantity || "");
+        const text    = (qty + " " + ing.name).trim();
+        const wrapped = doc.splitTextToSize(text, halfW - 8);
+        doc.setTextColor(249, 115, 22);
+        doc.setFont("helvetica", "normal");
+        doc.text("-", xStart + 2, cy);
+        doc.setTextColor(55, 65, 81);
+        doc.text(wrapped, xStart + 7, cy);
+        cy += wrapped.length * 5 + 1;
+      });
+      return cy;
+    };
+
+    const endY1 = drawIngCol(col1, margin);
+    const endY2 = drawIngCol(col2, margin + halfW + 6);
+    y = Math.max(endY1, endY2) + 6;
+  }
+
+  // Steps
+  if (recipe.steps && recipe.steps.length) {
+    checkPage(16);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(13);
+    doc.setTextColor(20, 20, 20);
+    doc.text("Instructions", margin, y);
+    y += 7;
+
+    recipe.steps.forEach((s, idx) => {
+      const text     = typeof s === "string" ? s : (s.text || "");
+      const timeNote = (typeof s === "object" && s.time_min) ? ("  [" + s.time_min + " min]") : "";
+      const fullText = text + timeNote;
+      const lines    = doc.splitTextToSize(fullText, contentW - 14);
+      const blockH   = lines.length * 5.2 + 5;
+      checkPage(blockH + 4);
+
+      doc.setFillColor(249, 115, 22);
+      doc.circle(margin + 4.5, y + 3, 4, "F");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8);
+      doc.setTextColor(255, 255, 255);
+      doc.text(String(idx + 1), margin + 4.5, y + 4.5, { align: "center" });
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(9);
+      doc.setTextColor(55, 65, 81);
+      doc.text(lines, margin + 11, y + 3);
+      y += blockH + 2;
+    });
+    y += 4;
+  }
+
+  // Nutrition
+  if (recipe.nutrition) {
+    const nutItems = [
+      { label: "Calories", val: recipe.nutrition.calories, fill: [255,247,237], tc: [194,65,12] },
+      { label: "Protein",  val: recipe.nutrition.protein,  fill: [240,253,244], tc: [21,128,61] },
+      { label: "Carbs",    val: recipe.nutrition.carbs,    fill: [239,246,255], tc: [29,78,216] },
+      { label: "Fat",      val: recipe.nutrition.fat,      fill: [253,244,255], tc: [126,34,206] },
+    ].filter(n => n.val);
+    if (nutItems.length) {
+      checkPage(26);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(13);
+      doc.setTextColor(20, 20, 20);
+      doc.text("Nutrition (per serving" + (servingMult > 1 ? (" x" + servingMult) : "") + ")", margin, y);
+      y += 6;
+      const colW = contentW / nutItems.length;
+      nutItems.forEach((n, i) => {
+        doc.setFillColor(...n.fill);
+        doc.setDrawColor(220, 220, 220);
+        doc.setLineWidth(0.3);
+        doc.roundedRect(margin + i * colW, y, colW - 2, 16, 2, 2, "FD");
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.setTextColor(...n.tc);
+        doc.text(String(n.val), margin + i * colW + (colW - 2) / 2, y + 7, { align: "center" });
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7.5);
+        doc.setTextColor(100, 100, 100);
+        doc.text(n.label, margin + i * colW + (colW - 2) / 2, y + 13, { align: "center" });
+      });
+      y += 22;
+    }
+  }
+
+  // Footer
+  checkPage(10);
+  doc.setDrawColor(220, 220, 220);
+  doc.setLineWidth(0.4);
+  doc.line(margin, y + 2, pageW - margin, y + 2);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7);
+  doc.setTextColor(160, 160, 160);
+  doc.text("Generated by ChefMind AI Kitchen Assistant", margin, y + 7);
+  doc.text("chefmind-frontend.vercel.app", pageW - margin, y + 7, { align: "right" });
+
+  const safeName = (recipe._title || recipe.title || "recipe").replace(/[\s/\\?%*:|"<>]/g, "_");
+  doc.save(safeName + "_recipe.pdf");
+};
   // ── Shopping list from plan ──
   const openShoppingList = (plan, title) => {
     const allIngredients = [];
@@ -2940,6 +3149,11 @@ const exportMealPlanPDF = (plan, title = "Weekly Meal Plan") => {
                         }}
                         sx={{ borderColor: "#f97316", color: "#f97316", borderRadius: 2, fontWeight: 700, "&:hover": { background: "#fff7ed", borderColor: "#ea580c" } }}>
                         Save Recipe
+                      </Button>
+                      <Button variant="outlined" startIcon={<DownloadIcon />}
+                        onClick={() => exportRecipePDF(recipeByName)}
+                        sx={{ borderColor: "#22c55e", color: "#15803d", borderRadius: 2, fontWeight: 700, "&:hover": { background: "#f0fdf4" } }}>
+                        Download PDF
                       </Button>
                       <Box display="flex" alignItems="center" gap={1} onClick={e => e.stopPropagation()}>
                         <StarRating
@@ -3622,6 +3836,13 @@ const exportMealPlanPDF = (plan, title = "Weekly Meal Plan") => {
                                   )}
                                 </Box>
                               )}
+                              {/* PDF export */}
+                              <Button
+                                fullWidth size="small" variant="outlined" startIcon={<DownloadIcon sx={{ fontSize: 14 }} />}
+                                onClick={(e) => { e.stopPropagation(); exportRecipePDF(r); }}
+                                sx={{ mt: 1.2, borderColor: "#22c55e", color: "#15803d", borderRadius: 2, fontWeight: 700, fontSize: "0.75rem", "&:hover": { background: "#f0fdf4" } }}>
+                                Download PDF
+                              </Button>
                             </Box>
                           </Card>
                         </Grid>
@@ -3819,6 +4040,11 @@ const exportMealPlanPDF = (plan, title = "Weekly Meal Plan") => {
                     onClick={() => { setOpen(false); setCookModeOpen(true); }}
                     sx={{ borderColor: "#f97316", color: "#f97316", borderRadius: 2, fontWeight: 600 }}>
                     Cook Mode
+                  </Button>
+                  <Button variant="outlined" size="small" startIcon={<DownloadIcon />}
+                    onClick={() => exportRecipePDF(details, servingMultiplier)}
+                    sx={{ borderColor: "#22c55e", color: "#15803d", borderRadius: 2, fontWeight: 600, "&:hover": { background: "#f0fdf4" } }}>
+                    Download PDF
                   </Button>
                 </Box>
 
