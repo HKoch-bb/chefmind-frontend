@@ -44,6 +44,8 @@ import StopIcon from "@mui/icons-material/Stop";
 import GraphicEqIcon from "@mui/icons-material/GraphicEq";
 import HistoryIcon from "@mui/icons-material/History";
 import AutorenewIcon from "@mui/icons-material/Autorenew";
+import ChatIcon from "@mui/icons-material/Chat";
+import SendIcon from "@mui/icons-material/Send";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -1821,6 +1823,325 @@ const RecipeAudioPlayer = ({ recipe, language = "English" }) => {
   );
 };
 
+// ─── AI Chef Chat ─────────────────────────────────────────────────────────────
+const CHAT_SUGGESTIONS = [
+  { icon: "🍳", text: "What can I cook with what's in my pantry?" },
+  { icon: "🌱", text: "How do I make a recipe vegan?" },
+  { icon: "🍷", text: "What wine pairs well with pasta?" },
+  { icon: "🧂", text: "My dish is too salty — how do I fix it?" },
+  { icon: "⚡", text: "Give me a quick 20-minute dinner idea" },
+  { icon: "🥗", text: "What are some high-protein vegetarian meals?" },
+];
+
+function AiChefChat({ pantryItems, savedRecipes, language, API }) {
+  const [messages, setMessages] = useState(() => {
+    const saved = localStorage.getItem("chatMessages");
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const bottomRef = useRef(null);
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    localStorage.setItem("chatMessages", JSON.stringify(messages.slice(-60)));
+  }, [messages]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
+
+  const sendMessage = async (text) => {
+    const content = (text || input).trim();
+    if (!content || loading) return;
+    setInput("");
+
+    const userMsg = { role: "user", content };
+    const nextMessages = [...messages, userMsg];
+    setMessages(nextMessages);
+    setLoading(true);
+
+    try {
+      const res = await axios.post(`${API}/chat`, {
+        messages: nextMessages,
+        pantry: pantryItems,
+        savedRecipeNames: savedRecipes.map(r => r._title || r.title).filter(Boolean),
+        language,
+      });
+      setMessages(prev => [...prev, { role: "assistant", content: res.data.reply }]);
+    } catch {
+      setMessages(prev => [...prev, {
+        role: "assistant",
+        content: "Sorry, I'm having trouble connecting right now. Please make sure the backend is running and try again.",
+      }]);
+    }
+    setLoading(false);
+    setTimeout(() => inputRef.current?.focus(), 100);
+  };
+
+  const clearChat = () => {
+    setMessages([]);
+    localStorage.removeItem("chatMessages");
+  };
+
+  // Render markdown-like formatting: **bold**, numbered lists, bullet points
+  const renderContent = (text) => {
+    const lines = text.split("\n");
+    return lines.map((line, i) => {
+      // Bold
+      const parts = line.split(/\*\*(.*?)\*\*/g);
+      const formatted = parts.map((p, j) =>
+        j % 2 === 1 ? <strong key={j}>{p}</strong> : p
+      );
+      // Numbered list
+      if (/^\d+\.\s/.test(line)) {
+        return (
+          <Box key={i} display="flex" gap={1} mb={0.5}>
+            <Typography fontSize="0.88rem" sx={{ color: "#f97316", fontWeight: 800, flexShrink: 0 }}>
+              {line.match(/^\d+/)[0]}.
+            </Typography>
+            <Typography fontSize="0.88rem" lineHeight={1.6}>{formatted.slice(1)}</Typography>
+          </Box>
+        );
+      }
+      // Bullet point
+      if (/^[-•]\s/.test(line)) {
+        return (
+          <Box key={i} display="flex" gap={1} mb={0.5}>
+            <Typography sx={{ color: "#f97316", flexShrink: 0, fontSize: "0.88rem" }}>•</Typography>
+            <Typography fontSize="0.88rem" lineHeight={1.6}>{formatted.slice(1)}</Typography>
+          </Box>
+        );
+      }
+      // Heading line (## or ###)
+      if (/^#{1,3}\s/.test(line)) {
+        return (
+          <Typography key={i} fontWeight={800} fontSize="0.92rem" mt={1} mb={0.3} color="#fff">
+            {line.replace(/^#+\s/, "")}
+          </Typography>
+        );
+      }
+      // Empty line
+      if (!line.trim()) return <Box key={i} mb={0.6} />;
+      // Normal line
+      return (
+        <Typography key={i} fontSize="0.88rem" lineHeight={1.65} mb={0.2}>
+          {formatted}
+        </Typography>
+      );
+    });
+  };
+
+  const pantryCount = pantryItems.filter(i => i.inStock !== false).length;
+
+  return (
+    <Box sx={{ minHeight: "100vh", background: "linear-gradient(160deg, #0d0907 0%, #1a0f0a 100%)", display: "flex", flexDirection: "column" }}>
+
+      {/* ── Header ── */}
+      <Box sx={{ position: "relative", overflow: "hidden", background: "linear-gradient(125deg, #1c0a02 0%, #3b1208 40%, #5c1a0a 70%, #7c2d12 100%)", px: { xs: 3, md: 5 }, py: 4 }}>
+        <Box sx={{ position: "absolute", inset: 0, opacity: 0.05, backgroundImage: "repeating-linear-gradient(45deg, #f97316 0px, #f97316 1px, transparent 1px, transparent 14px)" }} />
+        <Box sx={{ position: "relative", zIndex: 1, display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 2 }}>
+          <Box>
+            <Box sx={{ display: "inline-flex", alignItems: "center", gap: 1, background: "rgba(249,115,22,0.2)", border: "1px solid rgba(249,115,22,0.4)", borderRadius: "100px", px: 2, py: 0.5, mb: 2 }}>
+              <Box sx={{ width: 6, height: 6, borderRadius: "50%", background: "#f97316", boxShadow: "0 0 6px #f97316" }} />
+              <Typography sx={{ color: "#fdba74", fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase" }}>AI Chef Assistant</Typography>
+            </Box>
+            <Typography sx={{ fontWeight: 900, fontSize: { xs: "1.8rem", md: "2.4rem" }, letterSpacing: "-1.5px", color: "#fff", lineHeight: 1.1, mb: 1 }}>
+              🍳 Chef Chat
+            </Typography>
+            <Typography sx={{ color: "rgba(255,255,255,0.5)", fontSize: "0.9rem" }}>
+              Ask anything — recipes, techniques, pairings, substitutions
+            </Typography>
+          </Box>
+          <Box display="flex" alignItems="center" gap={2} flexWrap="wrap">
+            {/* Pantry context badge */}
+            <Box sx={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 2, px: 2, py: 1, textAlign: "center" }}>
+              <Typography sx={{ color: "#f97316", fontWeight: 800, fontSize: "1.1rem", lineHeight: 1 }}>{pantryCount}</Typography>
+              <Typography sx={{ color: "rgba(255,255,255,0.4)", fontSize: "0.65rem", fontWeight: 600 }}>pantry items</Typography>
+            </Box>
+            <Box sx={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 2, px: 2, py: 1, textAlign: "center" }}>
+              <Typography sx={{ color: "#22c55e", fontWeight: 800, fontSize: "1.1rem", lineHeight: 1 }}>{savedRecipes.length}</Typography>
+              <Typography sx={{ color: "rgba(255,255,255,0.4)", fontSize: "0.65rem", fontWeight: 600 }}>saved recipes</Typography>
+            </Box>
+            {messages.length > 0 && (
+              <Button size="small" onClick={clearChat}
+                sx={{ borderColor: "rgba(255,255,255,0.15)", color: "rgba(255,255,255,0.4)", borderRadius: 2, border: "1px solid", fontSize: "0.75rem", "&:hover": { borderColor: "#ef4444", color: "#ef4444" } }}>
+                Clear chat
+              </Button>
+            )}
+          </Box>
+        </Box>
+      </Box>
+
+      {/* ── Chat area ── */}
+      <Box sx={{ flex: 1, overflowY: "auto", px: { xs: 2, md: 4 }, py: 3, maxWidth: 860, width: "100%", mx: "auto" }}>
+
+        {/* Empty state */}
+        {messages.length === 0 && (
+          <Box>
+            <Box textAlign="center" py={4} mb={4}>
+              <Box sx={{ width: 72, height: 72, borderRadius: "50%", background: "linear-gradient(135deg, #ef4444, #f97316)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "2rem", mx: "auto", mb: 2, boxShadow: "0 0 40px rgba(239,68,68,0.3)" }}>
+                🍳
+              </Box>
+              <Typography sx={{ color: "#fff", fontWeight: 800, fontSize: "1.2rem", mb: 0.5 }}>
+                Your personal chef is ready
+              </Typography>
+              <Typography sx={{ color: "rgba(255,255,255,0.4)", fontSize: "0.88rem", maxWidth: 380, mx: "auto" }}>
+                {pantryCount > 0
+                  ? `I can see ${pantryCount} ingredient${pantryCount !== 1 ? "s" : ""} in your pantry. Ask me what to cook!`
+                  : "Ask me anything about cooking, recipes, or food pairings."}
+              </Typography>
+            </Box>
+
+            {/* Suggestion chips */}
+            <Box display="flex" flexWrap="wrap" gap={1.5} justifyContent="center" mb={2}>
+              {CHAT_SUGGESTIONS.map((s, i) => (
+                <Box key={i} onClick={() => sendMessage(s.text)} sx={{
+                  display: "flex", alignItems: "center", gap: 1,
+                  background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)",
+                  borderRadius: "100px", px: 2, py: 1, cursor: "pointer",
+                  transition: "all 0.18s",
+                  "&:hover": { background: "rgba(249,115,22,0.15)", borderColor: "rgba(249,115,22,0.4)", transform: "translateY(-2px)" },
+                }}>
+                  <Typography sx={{ fontSize: "0.9rem" }}>{s.icon}</Typography>
+                  <Typography sx={{ color: "rgba(255,255,255,0.7)", fontSize: "0.8rem", fontWeight: 500 }}>{s.text}</Typography>
+                </Box>
+              ))}
+            </Box>
+          </Box>
+        )}
+
+        {/* Messages */}
+        {messages.map((msg, i) => (
+          <Box key={i} display="flex" justifyContent={msg.role === "user" ? "flex-end" : "flex-start"} mb={2.5}>
+            {msg.role === "assistant" && (
+              <Box sx={{ width: 32, height: 32, borderRadius: "50%", background: "linear-gradient(135deg, #ef4444, #f97316)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.9rem", flexShrink: 0, mr: 1.5, mt: 0.3 }}>
+                🍳
+              </Box>
+            )}
+            <Box sx={{
+              maxWidth: "78%",
+              background: msg.role === "user"
+                ? "linear-gradient(135deg, #ef4444, #f97316)"
+                : "rgba(255,255,255,0.07)",
+              border: msg.role === "user" ? "none" : "1px solid rgba(255,255,255,0.1)",
+              borderRadius: msg.role === "user" ? "18px 18px 4px 18px" : "18px 18px 18px 4px",
+              px: 2.5, py: 1.8,
+              boxShadow: msg.role === "user" ? "0 4px 20px rgba(239,68,68,0.3)" : "none",
+            }}>
+              {msg.role === "user" ? (
+                <Typography sx={{ color: "#fff", fontSize: "0.9rem", lineHeight: 1.6, fontWeight: 500 }}>
+                  {msg.content}
+                </Typography>
+              ) : (
+                <Box sx={{ color: "rgba(255,255,255,0.88)" }}>
+                  {renderContent(msg.content)}
+                </Box>
+              )}
+            </Box>
+            {msg.role === "user" && (
+              <Box sx={{ width: 32, height: 32, borderRadius: "50%", background: "rgba(255,255,255,0.1)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.75rem", flexShrink: 0, ml: 1.5, mt: 0.3, color: "rgba(255,255,255,0.5)", fontWeight: 700 }}>
+                You
+              </Box>
+            )}
+          </Box>
+        ))}
+
+        {/* Typing indicator */}
+        {loading && (
+          <Box display="flex" alignItems="center" mb={2.5}>
+            <Box sx={{ width: 32, height: 32, borderRadius: "50%", background: "linear-gradient(135deg, #ef4444, #f97316)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.9rem", mr: 1.5, flexShrink: 0 }}>
+              🍳
+            </Box>
+            <Box sx={{ background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: "18px 18px 18px 4px", px: 2.5, py: 1.8, display: "flex", alignItems: "center", gap: 0.5 }}>
+              {[0, 1, 2].map(j => (
+                <Box key={j} sx={{
+                  width: 7, height: 7, borderRadius: "50%", background: "#f97316",
+                  animation: "bounce 1.2s ease-in-out infinite",
+                  animationDelay: `${j * 0.2}s`,
+                  "@keyframes bounce": {
+                    "0%, 80%, 100%": { transform: "scale(0.6)", opacity: 0.4 },
+                    "40%": { transform: "scale(1)", opacity: 1 },
+                  },
+                }} />
+              ))}
+            </Box>
+          </Box>
+        )}
+
+        <div ref={bottomRef} />
+      </Box>
+
+      {/* ── Input bar ── */}
+      <Box sx={{ borderTop: "1px solid rgba(255,255,255,0.07)", background: "rgba(0,0,0,0.4)", backdropFilter: "blur(10px)", px: { xs: 2, md: 4 }, py: 2.5 }}>
+        <Box sx={{ maxWidth: 860, mx: "auto", display: "flex", gap: 1.5, alignItems: "flex-end" }}>
+          <TextField
+            inputRef={inputRef}
+            fullWidth
+            multiline
+            maxRows={4}
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+              }
+            }}
+            placeholder="Ask your chef anything… (Enter to send, Shift+Enter for new line)"
+            variant="outlined"
+            disabled={loading}
+            sx={{
+              "& .MuiOutlinedInput-root": {
+                borderRadius: "14px",
+                background: "rgba(255,255,255,0.07)",
+                color: "#fff",
+                fontSize: "0.9rem",
+                "& fieldset": { borderColor: "rgba(255,255,255,0.12)" },
+                "&:hover fieldset": { borderColor: "rgba(249,115,22,0.4)" },
+                "&.Mui-focused fieldset": { borderColor: "#f97316", borderWidth: "1.5px" },
+              },
+              "& .MuiOutlinedInput-input": {
+                color: "#fff",
+                "&::placeholder": { color: "rgba(255,255,255,0.25)" },
+              },
+            }}
+          />
+          {/* Voice input */}
+          <MicButton
+            size={22}
+            onResult={(t) => setInput(prev => prev ? prev + " " + t : t)}
+          />
+          {/* Send button */}
+          <IconButton
+            onClick={() => sendMessage()}
+            disabled={!input.trim() || loading}
+            sx={{
+              width: 46, height: 46, flexShrink: 0,
+              background: input.trim() && !loading
+                ? "linear-gradient(135deg, #ef4444, #f97316)"
+                : "rgba(255,255,255,0.06)",
+              color: input.trim() && !loading ? "#fff" : "rgba(255,255,255,0.2)",
+              borderRadius: "12px",
+              transition: "all 0.2s",
+              "&:hover": {
+                background: input.trim() && !loading
+                  ? "linear-gradient(135deg, #dc2626, #ea580c)"
+                  : "rgba(255,255,255,0.06)",
+                transform: input.trim() && !loading ? "translateY(-1px)" : "none",
+              },
+            }}>
+            {loading ? <CircularProgress size={18} sx={{ color: "#f97316" }} /> : <SendIcon sx={{ fontSize: 20 }} />}
+          </IconButton>
+        </Box>
+        <Typography sx={{ color: "rgba(255,255,255,0.18)", fontSize: "0.65rem", textAlign: "center", mt: 1 }}>
+          ChefMind AI has access to your pantry and saved recipes · Shift+Enter for new line
+        </Typography>
+      </Box>
+    </Box>
+  );
+}
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
   const API = "http://localhost:5000";
@@ -2620,6 +2941,7 @@ const exportRecipePDF = (recipe, servingMult = 1) => {
     { muiIcon: <BookmarkIcon sx={{ fontSize: 20 }} />, label: "Saved Recipes", key: "saved" },
     { muiIcon: <StarIcon sx={{ fontSize: 20 }} />, label: "Top Rated Recipes", key: "toprated" },
     { muiIcon: <HistoryIcon sx={{ fontSize: 20 }} />, label: "Recipe History", key: "history" },
+    { muiIcon: <ChatIcon sx={{ fontSize: 20 }} />, label: "Chef Chat", key: "chat" },
   ];
 
   return (
@@ -4461,6 +4783,16 @@ const exportRecipePDF = (recipe, servingMult = 1) => {
               )}
             </Box>
           </Box>
+        )}
+
+        {/* ── CHEF CHAT ── */}
+        {page === "chat" && (
+          <AiChefChat
+            pantryItems={pantryItems}
+            savedRecipes={savedRecipes}
+            language={language}
+            API={API}
+          />
         )}
 
         {/* ── RECIPE DETAILS MODAL ── */}
