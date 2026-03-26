@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import axios from "axios";
 import {
   TextField, Button, Card, CardContent,
-  Typography, Grid, Box, Chip,
+  Typography, Grid, Box, Chip, Badge,
   Dialog, DialogTitle, DialogContent,
   Drawer, List, ListItem, ListItemText, IconButton,
   Select, MenuItem, FormControl, InputLabel,
@@ -46,6 +46,8 @@ import HistoryIcon from "@mui/icons-material/History";
 import AutorenewIcon from "@mui/icons-material/Autorenew";
 import AddShoppingCartIcon from "@mui/icons-material/AddShoppingCart";
 import RemoveShoppingCartIcon from "@mui/icons-material/RemoveShoppingCart";
+import NotificationsActiveIcon from "@mui/icons-material/NotificationsActive";
+import NotificationsNoneIcon from "@mui/icons-material/NotificationsNone";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 
@@ -1823,6 +1825,340 @@ const RecipeAudioPlayer = ({ recipe, language = "English" }) => {
   );
 };
 
+// ─── Low-Stock Detection Helpers ─────────────────────────────────────────────
+//
+//  "Nearing out of stock" definition — per unit type:
+//
+//  The thresholds are set to the point where you likely can't complete even
+//  one full recipe without running out. A recipe usually needs:
+//    - liquids:  at least 200–400 ml  → warn below 200 ml / 0.3 L
+//    - dry bulk: at least 100 g        → warn below 100 g / 0.25 kg
+//    - small dry: at least 4 tsp       → warn below 4 tsp / 2 tbsp / 0.5 cup
+//    - proteins: at least 3 pieces     → warn at 2 or fewer
+//    - flavour:  at least 3 cloves     → warn at 3 or fewer cloves
+//    - cans/bunches: warn at last 1
+//    - unlabelled count items: warn at 2 or fewer
+//
+const LOW_STOCK_THRESHOLDS = {
+  g:       100,
+  kg:      0.25,
+  ml:      200,
+  l:       0.3,
+  tsp:     4,
+  tbsp:    2,
+  cup:     0.5,
+  "fl oz": 6,
+  oz:      4,
+  lb:      0.5,
+  piece:   2,
+  slice:   2,
+  clove:   3,
+  can:     1,
+  bunch:   1,
+};
+
+function getLowStockStatus(item) {
+  if (!item.inStock) return null; // already handled as "out of stock"
+  const qty = parseFloat(item.qty);
+  if (isNaN(qty) || qty <= 0) return null;
+  const unit = (item.unit || "").toLowerCase().trim();
+  const threshold = LOW_STOCK_THRESHOLDS[unit] ?? 2; // default: count items ≤ 2
+  return qty <= threshold ? { isLow: true, qty, unit, threshold } : null;
+}
+
+function getIngredientEmoji(name) {
+  const n = name.toLowerCase();
+  if (n.includes("egg"))         return "🥚";
+  if (n.includes("milk"))        return "🥛";
+  if (n.includes("butter"))      return "🧈";
+  if (n.includes("cheese"))      return "🧀";
+  if (n.includes("chicken"))     return "🍗";
+  if (n.includes("beef") || n.includes("meat")) return "🥩";
+  if (n.includes("fish") || n.includes("salmon") || n.includes("tuna")) return "🐟";
+  if (n.includes("tofu"))        return "🍱";
+  if (n.includes("tomato"))      return "🍅";
+  if (n.includes("onion"))       return "🧅";
+  if (n.includes("garlic"))      return "🧄";
+  if (n.includes("lemon") || n.includes("lime")) return "🍋";
+  if (n.includes("pepper"))      return "🌶️";
+  if (n.includes("spinach") || n.includes("lettuce") || n.includes("kale")) return "🥬";
+  if (n.includes("carrot"))      return "🥕";
+  if (n.includes("potato"))      return "🥔";
+  if (n.includes("rice"))        return "🍚";
+  if (n.includes("flour") || n.includes("bread")) return "🍞";
+  if (n.includes("pasta") || n.includes("noodle")) return "🍝";
+  if (n.includes("oil"))         return "🫙";
+  if (n.includes("salt"))        return "🧂";
+  if (n.includes("sugar") || n.includes("honey")) return "🍯";
+  if (n.includes("yogurt") || n.includes("cream")) return "🥗";
+  if (n.includes("apple"))       return "🍎";
+  if (n.includes("banana"))      return "🍌";
+  if (n.includes("bean") || n.includes("lentil") || n.includes("chickpea")) return "🫘";
+  return "🥄";
+}
+
+function getLowStockMessage(item) {
+  const n = item.name.toLowerCase();
+  const qtyStr = [item.qty, item.unit].filter(Boolean).join(" ");
+  const name   = item.name;
+
+  // Cooking essentials — worst to run out mid-recipe
+  if (["oil", "butter"].some(k => n.includes(k)))
+    return `Almost out of ${name} (${qtyStr}) — hard to cook anything without it. Restock soon.`;
+  if (n.includes("salt"))
+    return `Only ${qtyStr} of salt left. It's in every recipe — add it to your next shop.`;
+  if (n.includes("flour"))
+    return `Running low on ${name} (${qtyStr}). If you bake or bread anything, you'll need more.`;
+  if (n.includes("sugar") || n.includes("honey"))
+    return `Low on ${name} (${qtyStr}). Used for baking, sauces and marinades — worth grabbing.`;
+
+  // Proteins — bulky items you plan meals around
+  if (["chicken", "beef", "lamb", "pork", "turkey", "fish", "salmon", "tuna", "shrimp"].some(k => n.includes(k)))
+    return `Only ${qtyStr} of ${name} left — probably not enough for a full meal. Time to stock up.`;
+  if (n.includes("egg"))
+    return `Just ${qtyStr} remaining. Eggs disappear fast — breakfasts, baking, and bindings all need them.`;
+  if (n.includes("tofu"))
+    return `Low on ${name} (${qtyStr}). Good protein base — add to your grocery list before your next cook.`;
+
+  // Dairy — short shelf life, often needed urgently
+  if (["milk", "cream", "yogurt"].some(k => n.includes(k)))
+    return `${name} spoils quickly and you're almost out (${qtyStr}). Grab more before your next cooking session.`;
+  if (n.includes("cheese"))
+    return `Only ${qtyStr} of ${name} left. Widely used — from pasta to salads. Worth picking up fresh.`;
+  if (n.includes("butter"))
+    return `Down to ${qtyStr} of butter. A kitchen staple for cooking, baking, and finishing sauces.`;
+
+  // Aromatics — used in almost every cuisine
+  if (n.includes("garlic"))
+    return `Garlic is in nearly every cuisine — you're down to ${qtyStr}. A cheap and essential restock.`;
+  if (n.includes("onion"))
+    return `Only ${qtyStr} of ${name} left. Onions are the backbone of most meals — restock soon.`;
+  if (n.includes("ginger"))
+    return `Running low on ginger (${qtyStr}). Grab fresh or dried — used across Asian, Indian, and Middle Eastern cooking.`;
+  if (n.includes("lemon") || n.includes("lime"))
+    return `Only ${qtyStr} of ${name} left. A squeeze can finish any dish — worth having on hand.`;
+
+  // Spices — long shelf life, easy to forget
+  if (["cumin", "turmeric", "paprika", "cinnamon", "coriander", "cardamom", "chili", "chilli", "oregano", "thyme", "basil"].some(k => n.includes(k)))
+    return `Running low on ${name} (${qtyStr}). Spices are cheap and last long — top it up on your next trip.`;
+
+  // Pantry staples
+  if (n.includes("rice"))
+    return `Only ${qtyStr} of rice left — a meal-plan essential. Easy and cheap to restock in bulk.`;
+  if (n.includes("pasta") || n.includes("noodle"))
+    return `Low on ${name} (${qtyStr}). Pasta is a quick-meal backbone — grab an extra pack.`;
+  if (["lentil", "chickpea", "bean"].some(k => n.includes(k)))
+    return `Down to ${qtyStr} of ${name}. A protein-rich pantry staple — great for soups, curries, and salads.`;
+  if (n.includes("can") || n.includes("stock") || n.includes("broth"))
+    return `Last ${qtyStr} of ${name}. Stocks and canned goods are recipe lifesavers — worth keeping 2–3 on hand.`;
+
+  // Generic fallback — still contextual
+  return `${name} is running low (${qtyStr}). Add it to your grocery list before it runs out completely.`;
+}
+
+// ─── Low Stock Notification Panel ────────────────────────────────────────────
+const LowStockNotificationPanel = ({ open, onClose, lowStockItems, onAddToGrocery, onDismiss, onDismissAll }) => {
+  if (!open) return null;
+
+  return (
+    <Drawer
+      anchor="right"
+      open={open}
+      onClose={onClose}
+      PaperProps={{
+        sx: {
+          width: 380,
+          background: "#0f1009",
+          display: "flex",
+          flexDirection: "column",
+          borderLeft: "1px solid rgba(234,179,8,0.2)",
+        },
+      }}
+    >
+      {/* Header */}
+      <Box sx={{
+        px: 3, py: 2.5,
+        background: "linear-gradient(135deg, #1a1800, #2a2000)",
+        borderBottom: "1px solid rgba(234,179,8,0.15)",
+        flexShrink: 0,
+      }}>
+        <Box display="flex" alignItems="center" justifyContent="space-between">
+          <Box display="flex" alignItems="center" gap={1.5}>
+            <Box sx={{
+              width: 36, height: 36, borderRadius: 2,
+              background: "rgba(234,179,8,0.15)",
+              border: "1px solid rgba(234,179,8,0.3)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <NotificationsActiveIcon sx={{ color: "#eab308", fontSize: 20 }} />
+            </Box>
+            <Box>
+              <Typography fontWeight={800} color="#fff" fontSize="1rem">Pantry Alerts</Typography>
+              <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.4)" }}>
+                {lowStockItems.length} item{lowStockItems.length !== 1 ? "s" : ""} running low
+              </Typography>
+            </Box>
+          </Box>
+          <IconButton onClick={onClose} sx={{ color: "rgba(255,255,255,0.4)", "&:hover": { color: "#fff" } }}>
+            <CloseIcon sx={{ fontSize: 18 }} />
+          </IconButton>
+        </Box>
+
+        {/* Urgency bar */}
+        <Box sx={{
+          mt: 2, px: 2, py: 1.2,
+          background: "rgba(234,179,8,0.08)",
+          border: "1px solid rgba(234,179,8,0.18)",
+          borderRadius: 2,
+          display: "flex", alignItems: "center", gap: 1,
+        }}>
+          <Typography sx={{ fontSize: "0.9rem" }}>💡</Typography>
+          <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.55)", lineHeight: 1.4 }}>
+            These items are below the minimum to complete most recipes. Click "Add to grocery list" to restock.
+          </Typography>
+        </Box>
+      </Box>
+
+      {/* Items list */}
+      <Box sx={{ flex: 1, overflowY: "auto", py: 1 }}>
+        {lowStockItems.length === 0 ? (
+          <Box textAlign="center" py={8} px={3}>
+            <Typography sx={{ fontSize: "2.5rem", mb: 1.5 }}>✅</Typography>
+            <Typography fontWeight={700} color="#fff" mb={0.5}>All stocked up!</Typography>
+            <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.4)" }}>
+              No pantry items are running critically low right now.
+            </Typography>
+          </Box>
+        ) : (
+          lowStockItems.map((item, idx) => {
+            const qtyStr = [item.qty, item.unit].filter(Boolean).join(" ");
+            const emoji  = getIngredientEmoji(item.name);
+            const msg    = getLowStockMessage(item);
+
+            return (
+              <Box key={`${item.name}-${idx}`} sx={{
+                mx: 2, my: 1,
+                background: "rgba(255,255,255,0.04)",
+                border: "1px solid rgba(234,179,8,0.14)",
+                borderRadius: 2.5,
+                overflow: "hidden",
+                transition: "border-color 0.2s",
+                "&:hover": { borderColor: "rgba(234,179,8,0.3)" },
+              }}>
+                {/* Item header */}
+                <Box sx={{ px: 2, py: 1.5, display: "flex", alignItems: "center", gap: 1.5 }}>
+                  <Box sx={{
+                    width: 38, height: 38, borderRadius: "50%", flexShrink: 0,
+                    background: "rgba(234,179,8,0.12)",
+                    border: "1px solid rgba(234,179,8,0.2)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: "1.2rem",
+                  }}>
+                    {emoji}
+                  </Box>
+                  <Box flex={1} minWidth={0}>
+                    <Typography fontWeight={700} color="#fff" fontSize="0.9rem" noWrap>{item.name}</Typography>
+                    <Box display="flex" alignItems="center" gap={0.8} mt={0.3}>
+                      <Box sx={{
+                        background: "rgba(239,68,68,0.2)",
+                        border: "1px solid rgba(239,68,68,0.35)",
+                        borderRadius: 1, px: 0.9, py: 0.2,
+                      }}>
+                        <Typography sx={{ color: "#fca5a5", fontSize: "0.68rem", fontWeight: 700 }}>
+                          ⚠ {qtyStr || "almost out"} left
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </Box>
+                  {/* Dismiss × */}
+                  <Tooltip title="Dismiss this alert">
+                    <IconButton size="small" onClick={() => onDismiss(item.name)}
+                      sx={{ color: "rgba(255,255,255,0.2)", p: 0.4, "&:hover": { color: "rgba(255,255,255,0.6)" } }}>
+                      <CloseIcon sx={{ fontSize: 14 }} />
+                    </IconButton>
+                  </Tooltip>
+                </Box>
+
+                {/* Message */}
+                <Box sx={{ px: 2, pb: 1.5 }}>
+                  <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.45)", lineHeight: 1.55, display: "block" }}>
+                    {msg}
+                  </Typography>
+
+                  {/* Action buttons */}
+                  <Box display="flex" gap={1} mt={1.5}>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      startIcon={<AddShoppingCartIcon sx={{ fontSize: 14 }} />}
+                      onClick={() => onAddToGrocery(item)}
+                      sx={{
+                        background: "linear-gradient(135deg, #eab308, #ca8a04)",
+                        color: "#1a1200",
+                        borderRadius: 1.5,
+                        fontWeight: 800,
+                        fontSize: "0.72rem",
+                        py: 0.6, px: 1.5,
+                        boxShadow: "none",
+                        "&:hover": { background: "linear-gradient(135deg, #facc15, #eab308)", boxShadow: "0 4px 12px rgba(234,179,8,0.3)" },
+                        transition: "all 0.15s",
+                      }}
+                    >
+                      Add to grocery list
+                    </Button>
+                    <Button
+                      size="small"
+                      onClick={() => onDismiss(item.name)}
+                      sx={{
+                        color: "rgba(255,255,255,0.3)",
+                        fontSize: "0.72rem",
+                        borderRadius: 1.5,
+                        py: 0.6, px: 1.5,
+                        "&:hover": { color: "rgba(255,255,255,0.6)", background: "rgba(255,255,255,0.06)" },
+                      }}
+                    >
+                      Dismiss
+                    </Button>
+                  </Box>
+                </Box>
+              </Box>
+            );
+          })
+        )}
+      </Box>
+
+      {/* Footer */}
+      {lowStockItems.length > 0 && (
+        <Box sx={{ px: 3, py: 2, borderTop: "1px solid rgba(255,255,255,0.06)", flexShrink: 0, display: "flex", gap: 1.5 }}>
+          <Button
+            fullWidth
+            variant="outlined"
+            startIcon={<AddShoppingCartIcon sx={{ fontSize: 16 }} />}
+            onClick={() => { lowStockItems.forEach(i => onAddToGrocery(i)); onClose(); }}
+            sx={{
+              borderColor: "rgba(234,179,8,0.4)",
+              color: "#eab308",
+              borderRadius: 2,
+              fontWeight: 700,
+              fontSize: "0.8rem",
+              "&:hover": { borderColor: "#eab308", background: "rgba(234,179,8,0.08)" },
+            }}
+          >
+            Add all to grocery list
+          </Button>
+          <Button
+            size="small"
+            onClick={onDismissAll}
+            sx={{ color: "rgba(255,255,255,0.25)", fontSize: "0.75rem", whiteSpace: "nowrap", flexShrink: 0 }}
+          >
+            Dismiss all
+          </Button>
+        </Box>
+      )}
+    </Drawer>
+  );
+};
+
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
   const API = "http://localhost:5000";
@@ -1949,6 +2285,53 @@ export default function App() {
   const [pantryInputQty, setPantryInputQty] = useState("");
   const [pantryInputUnit, setPantryInputUnit] = useState("");
 
+  // ── Low-stock notifications ──
+  // Names of items the user has dismissed — resets on page refresh (intentional)
+  const [dismissedLowStock, setDismissedLowStock] = useState(new Set());
+  const [notifPanelOpen, setNotifPanelOpen] = useState(false);
+  // Track which items we've already shown an auto-toast for (avoid repeat toasts)
+  const notifToastedRef = React.useRef(new Set());
+
+  // ── Chef Chat widget ──
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState([
+    { role: "assistant", content: "Hey! I'm your personal chef 🧑‍🍳 Ask me anything — recipes, substitutions, cooking tips, or what to make with what's in your pantry." }
+  ]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const chatEndRef = React.useRef(null);
+
+  const sendChatMessage = useCallback(async () => {
+    const text = chatInput.trim();
+    if (!text || chatLoading) return;
+    const userMsg = { role: "user", content: text };
+    const nextMessages = [...chatMessages, userMsg];
+    setChatMessages(nextMessages);
+    setChatInput("");
+    setChatLoading(true);
+    try {
+      const res = await fetch(`${API}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          messages: nextMessages,
+          pantry: pantryItems,
+          savedRecipeNames: savedRecipes.map(r => r._title).filter(Boolean),
+          language,
+        }),
+      });
+      const data = await res.json();
+      setChatMessages(prev => [...prev, { role: "assistant", content: data.reply || "Sorry, I couldn't respond right now." }]);
+    } catch {
+      setChatMessages(prev => [...prev, { role: "assistant", content: "I'm having trouble connecting — try again in a moment." }]);
+    }
+    setChatLoading(false);
+  }, [chatInput, chatMessages, chatLoading, pantryItems, savedRecipes, language]);
+
+  useEffect(() => {
+    if (chatOpen) setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: "smooth" }), 60);
+  }, [chatMessages, chatOpen]);
+
   // ── Onboarding ──
   const [showOnboarding, setShowOnboarding] = useState(
     !localStorage.getItem("onboardingDone")
@@ -1985,6 +2368,28 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem("groceryList", JSON.stringify(groceryList));
   }, [groceryList]);
+
+  // ── Low-stock: computed items + auto-toast when qty drops low ──
+  const lowStockItems = React.useMemo(
+    () => pantryItems.filter(item => getLowStockStatus(item) && !dismissedLowStock.has(item.name)),
+    [pantryItems, dismissedLowStock]
+  );
+
+  // Fire a brief toast (once per item per session) when quantity dips below threshold
+  useEffect(() => {
+    lowStockItems.forEach(item => {
+      if (!notifToastedRef.current.has(item.name)) {
+        notifToastedRef.current.add(item.name);
+        const qtyStr = [item.qty, item.unit].filter(Boolean).join(" ");
+        showToast(`⚠️ ${item.name} is running low (${qtyStr})`, "info");
+      }
+    });
+    // If an item recovers (restocked), remove it from the toasted set so it can fire again later
+    const lowNames = new Set(lowStockItems.map(i => i.name));
+    notifToastedRef.current.forEach(name => {
+      if (!lowNames.has(name)) notifToastedRef.current.delete(name);
+    });
+  }, [lowStockItems, showToast]);
 
   // ── Helpers ──
   const addIngredient = useCallback(() => {
@@ -2822,6 +3227,33 @@ const exportRecipePDF = (recipe, servingMult = 1) => {
         onClose={() => setSubModal({ open: false, ingredient: null })}
       />
 
+      {/* ── Low-Stock Notification Panel ── */}
+      <LowStockNotificationPanel
+        open={notifPanelOpen}
+        onClose={() => setNotifPanelOpen(false)}
+        lowStockItems={lowStockItems}
+        onAddToGrocery={(item) => {
+          const name = item.name;
+          if (!isInGroceryList(name)) {
+            setGroceryList(prev => [...prev, {
+              name,
+              qty: item.qty || "",
+              unit: item.unit || "",
+              addedFrom: "Pantry alert",
+            }]);
+            showToast(`"${name}" added to grocery list 🛒`, "success");
+          } else {
+            showToast(`"${name}" is already in your grocery list`, "info");
+          }
+          setDismissedLowStock(prev => new Set([...prev, name]));
+        }}
+        onDismiss={(name) => setDismissedLowStock(prev => new Set([...prev, name]))}
+        onDismissAll={() => {
+          setDismissedLowStock(prev => new Set([...prev, ...lowStockItems.map(i => i.name)]));
+          setNotifPanelOpen(false);
+        }}
+      />
+
       {/* ── Cook mode ── */}
       <CookMode
         open={cookModeOpen}
@@ -2896,6 +3328,298 @@ const exportRecipePDF = (recipe, servingMult = 1) => {
           )}
         </Box>
       </Drawer>
+
+      {/* ══ FIXED TOP-RIGHT: Notification Bell ══ */}
+      <Box sx={{
+        position: "fixed", top: 16, right: 20, zIndex: 1300,
+        display: "flex", alignItems: "center", gap: 1,
+      }}>
+        <Tooltip title={lowStockItems.length > 0 ? `${lowStockItems.length} pantry alert${lowStockItems.length !== 1 ? "s" : ""}` : "No pantry alerts"} arrow placement="bottom">
+          <IconButton
+            onClick={() => setNotifPanelOpen(true)}
+            sx={{
+              width: 40, height: 40,
+              background: lowStockItems.length > 0 ? "rgba(234,179,8,0.15)" : "rgba(255,255,255,0.08)",
+              border: `1.5px solid ${lowStockItems.length > 0 ? "rgba(234,179,8,0.5)" : "rgba(255,255,255,0.15)"}`,
+              backdropFilter: "blur(12px)",
+              borderRadius: 2,
+              transition: "all 0.2s",
+              animation: lowStockItems.length > 0 ? "bellPulse 2.5s ease-in-out infinite" : "none",
+              "@keyframes bellPulse": {
+                "0%,100%": { boxShadow: "0 0 0 0 rgba(234,179,8,0)" },
+                "50%": { boxShadow: "0 0 0 5px rgba(234,179,8,0.15)" },
+              },
+              "&:hover": {
+                background: lowStockItems.length > 0 ? "rgba(234,179,8,0.25)" : "rgba(255,255,255,0.15)",
+                borderColor: lowStockItems.length > 0 ? "#eab308" : "rgba(255,255,255,0.3)",
+                transform: "scale(1.05)",
+              },
+            }}
+          >
+            <Badge
+              badgeContent={lowStockItems.length}
+              invisible={lowStockItems.length === 0}
+              sx={{
+                "& .MuiBadge-badge": {
+                  fontSize: "0.58rem", fontWeight: 900, minWidth: 15, height: 15, padding: "0 3px",
+                  background: "#eab308", color: "#1a1200",
+                  top: -2, right: -2,
+                },
+              }}
+            >
+              {lowStockItems.length > 0
+                ? <NotificationsActiveIcon sx={{ fontSize: 18, color: "#eab308" }} />
+                : <NotificationsNoneIcon  sx={{ fontSize: 18, color: "rgba(255,255,255,0.4)" }} />
+              }
+            </Badge>
+          </IconButton>
+        </Tooltip>
+      </Box>
+
+      {/* ══ FLOATING CHEF CHAT WIDGET (bottom-right) ══ */}
+      <Box sx={{ position: "fixed", bottom: 24, right: 24, zIndex: 1400, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 1.5 }}>
+
+        {/* Chat window */}
+        {chatOpen && (
+          <Box sx={{
+            width: 360, height: 520,
+            background: "#141210",
+            border: "1px solid rgba(107,140,90,0.3)",
+            borderRadius: 3,
+            boxShadow: "0 24px 64px rgba(0,0,0,0.6)",
+            display: "flex", flexDirection: "column",
+            overflow: "hidden",
+            animation: "chatSlideUp 0.25s cubic-bezier(0.34,1.56,0.64,1)",
+            "@keyframes chatSlideUp": {
+              from: { opacity: 0, transform: "translateY(20px) scale(0.95)" },
+              to:   { opacity: 1, transform: "translateY(0) scale(1)" },
+            },
+          }}>
+            {/* Header */}
+            <Box sx={{
+              px: 2, py: 1.5,
+              background: "linear-gradient(135deg, #1a1612, #1e2b1a)",
+              borderBottom: "1px solid rgba(107,140,90,0.2)",
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              flexShrink: 0,
+            }}>
+              <Box display="flex" alignItems="center" gap={1.2}>
+                <Box sx={{
+                  width: 34, height: 34, borderRadius: "50%",
+                  background: "linear-gradient(135deg, #6b8c5a, #b8714e)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  fontSize: "1rem", flexShrink: 0,
+                  boxShadow: "0 0 12px rgba(107,140,90,0.4)",
+                }}>🧑‍🍳</Box>
+                <Box>
+                  <Typography sx={{ color: "#fff", fontWeight: 800, fontSize: "0.88rem", lineHeight: 1.2 }}>ChefMind AI</Typography>
+                  <Box display="flex" alignItems="center" gap={0.5}>
+                    <Box sx={{ width: 6, height: 6, borderRadius: "50%", background: "#22c55e", boxShadow: "0 0 6px #22c55e" }} />
+                    <Typography sx={{ color: "rgba(255,255,255,0.4)", fontSize: "0.65rem" }}>
+                      {chatLoading ? "Thinking…" : "Online"}
+                    </Typography>
+                  </Box>
+                </Box>
+              </Box>
+              <Box display="flex" gap={0.5}>
+                <Tooltip title="Clear chat">
+                  <IconButton
+                    size="small"
+                    onClick={() => setChatMessages([{ role: "assistant", content: "Hey! I'm your personal chef 🧑‍🍳 Ask me anything — recipes, substitutions, cooking tips, or what to make with what's in your pantry." }])}
+                    sx={{ color: "rgba(255,255,255,0.3)", "&:hover": { color: "#fff" }, p: 0.5 }}
+                  >
+                    <AutorenewIcon sx={{ fontSize: 15 }} />
+                  </IconButton>
+                </Tooltip>
+                <IconButton size="small" onClick={() => setChatOpen(false)} sx={{ color: "rgba(255,255,255,0.3)", "&:hover": { color: "#fff" }, p: 0.5 }}>
+                  <CloseIcon sx={{ fontSize: 16 }} />
+                </IconButton>
+              </Box>
+            </Box>
+
+            {/* Messages */}
+            <Box sx={{ flex: 1, overflowY: "auto", px: 2, py: 1.5, display: "flex", flexDirection: "column", gap: 1,
+              "&::-webkit-scrollbar": { width: 4 },
+              "&::-webkit-scrollbar-track": { background: "transparent" },
+              "&::-webkit-scrollbar-thumb": { background: "rgba(107,140,90,0.3)", borderRadius: 2 },
+            }}>
+              {chatMessages.map((msg, i) => (
+                <Box key={i} sx={{
+                  display: "flex",
+                  justifyContent: msg.role === "user" ? "flex-end" : "flex-start",
+                  alignItems: "flex-end", gap: 0.8,
+                }}>
+                  {msg.role === "assistant" && (
+                    <Box sx={{ width: 24, height: 24, borderRadius: "50%", background: "linear-gradient(135deg, #6b8c5a, #b8714e)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.7rem", flexShrink: 0, mb: 0.2 }}>🧑‍🍳</Box>
+                  )}
+                  <Box sx={{
+                    maxWidth: "78%",
+                    px: 1.5, py: 1,
+                    borderRadius: msg.role === "user" ? "16px 16px 4px 16px" : "16px 16px 16px 4px",
+                    background: msg.role === "user"
+                      ? "linear-gradient(135deg, #5a7c4a, #4a6a3a)"
+                      : "rgba(255,255,255,0.07)",
+                    border: msg.role === "user" ? "none" : "1px solid rgba(255,255,255,0.08)",
+                  }}>
+                    <Typography sx={{
+                      color: msg.role === "user" ? "#fff" : "rgba(255,255,255,0.85)",
+                      fontSize: "0.82rem", lineHeight: 1.55, whiteSpace: "pre-wrap",
+                    }}>
+                      {msg.content}
+                    </Typography>
+                  </Box>
+                </Box>
+              ))}
+              {chatLoading && (
+                <Box display="flex" alignItems="flex-end" gap={0.8}>
+                  <Box sx={{ width: 24, height: 24, borderRadius: "50%", background: "linear-gradient(135deg, #6b8c5a, #b8714e)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "0.7rem", flexShrink: 0 }}>🧑‍🍳</Box>
+                  <Box sx={{ px: 1.5, py: 1, borderRadius: "16px 16px 16px 4px", background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                    <Box display="flex" gap={0.4} alignItems="center" height={18}>
+                      {[0,1,2].map(i => (
+                        <Box key={i} sx={{
+                          width: 6, height: 6, borderRadius: "50%", background: "#6b8c5a",
+                          animation: "typingDot 1.2s ease-in-out infinite",
+                          animationDelay: `${i * 0.2}s`,
+                          "@keyframes typingDot": {
+                            "0%,60%,100%": { transform: "translateY(0)", opacity: 0.4 },
+                            "30%": { transform: "translateY(-5px)", opacity: 1 },
+                          },
+                        }} />
+                      ))}
+                    </Box>
+                  </Box>
+                </Box>
+              )}
+              <div ref={chatEndRef} />
+            </Box>
+
+            {/* Quick suggestions (only when first open) */}
+            {chatMessages.length === 1 && !chatLoading && (
+              <Box sx={{ px: 2, pb: 1, display: "flex", flexWrap: "wrap", gap: 0.7, flexShrink: 0 }}>
+                {[
+                  "What can I cook with my pantry?",
+                  "Suggest a quick dinner",
+                  "I have eggs and rice — ideas?",
+                  "How do I fix an over-salted dish?",
+                ].map(s => (
+                  <Box key={s} onClick={() => { setChatInput(s); }}
+                    sx={{
+                      px: 1.2, py: 0.5, borderRadius: "12px", cursor: "pointer",
+                      background: "rgba(107,140,90,0.1)", border: "1px solid rgba(107,140,90,0.25)",
+                      fontSize: "0.7rem", color: "#a8c298", fontWeight: 600,
+                      transition: "all 0.15s",
+                      "&:hover": { background: "rgba(107,140,90,0.2)", borderColor: "rgba(107,140,90,0.5)" },
+                    }}
+                  >{s}</Box>
+                ))}
+              </Box>
+            )}
+
+            {/* Input */}
+            <Box sx={{
+              px: 2, py: 1.5,
+              borderTop: "1px solid rgba(255,255,255,0.07)",
+              flexShrink: 0,
+              display: "flex", gap: 1, alignItems: "flex-end",
+            }}>
+              <TextField
+                multiline maxRows={3}
+                fullWidth
+                placeholder="Ask anything about cooking…"
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChatMessage(); } }}
+                size="small"
+                sx={{
+                  "& .MuiOutlinedInput-root": {
+                    background: "rgba(255,255,255,0.06)",
+                    borderRadius: 2.5,
+                    color: "#fff",
+                    fontSize: "0.82rem",
+                    "& fieldset": { borderColor: "rgba(255,255,255,0.1)" },
+                    "&:hover fieldset": { borderColor: "rgba(107,140,90,0.4)" },
+                    "&.Mui-focused fieldset": { borderColor: "#6b8c5a" },
+                  },
+                  "& .MuiInputBase-input::placeholder": { color: "rgba(255,255,255,0.25)", opacity: 1 },
+                }}
+              />
+              <IconButton
+                onClick={sendChatMessage}
+                disabled={!chatInput.trim() || chatLoading}
+                sx={{
+                  width: 36, height: 36, flexShrink: 0,
+                  background: chatInput.trim() ? "linear-gradient(135deg, #5a7c4a, #4a6a3a)" : "rgba(255,255,255,0.06)",
+                  color: chatInput.trim() ? "#fff" : "rgba(255,255,255,0.2)",
+                  borderRadius: 2,
+                  transition: "all 0.2s",
+                  "&:hover": { background: "linear-gradient(135deg, #6b8c5a, #5a7a4a)" },
+                  "&:disabled": { background: "rgba(255,255,255,0.04)", color: "rgba(255,255,255,0.15)" },
+                }}
+              >
+                {chatLoading
+                  ? <CircularProgress size={14} sx={{ color: "#6b8c5a" }} />
+                  : <PlayArrowIcon sx={{ fontSize: 18 }} />
+                }
+              </IconButton>
+            </Box>
+          </Box>
+        )}
+
+        {/* FAB — clean pill */}
+        <Box
+          onClick={() => setChatOpen(o => !o)}
+          sx={{
+            display: "flex", alignItems: "center", gap: 1.2,
+            pl: 0.8, pr: 2.2, height: 54,
+            borderRadius: "100px",
+            cursor: "pointer",
+            userSelect: "none",
+            background: chatOpen
+              ? "linear-gradient(135deg, #1f2937, #374151)"
+              : "linear-gradient(135deg, #5a7c4a 0%, #3d5c2e 100%)",
+            boxShadow: chatOpen
+              ? "0 6px 20px rgba(0,0,0,0.4)"
+              : "0 6px 24px rgba(107,140,90,0.55)",
+            border: chatOpen
+              ? "1px solid rgba(255,255,255,0.08)"
+              : "1.5px solid rgba(255,255,255,0.15)",
+            transition: "all 0.25s cubic-bezier(0.34,1.56,0.64,1)",
+            "&:hover": {
+              transform: "translateY(-2px)",
+              boxShadow: chatOpen
+                ? "0 10px 28px rgba(0,0,0,0.5)"
+                : "0 10px 32px rgba(107,140,90,0.65)",
+            },
+          }}
+        >
+          {/* Avatar */}
+          <Box sx={{
+            width: 38, height: 38, borderRadius: "50%", flexShrink: 0,
+            background: "rgba(255,255,255,0.15)",
+            border: "1.5px solid rgba(255,255,255,0.25)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            fontSize: "1.15rem",
+          }}>
+            {chatOpen ? <CloseIcon sx={{ fontSize: 16, color: "rgba(255,255,255,0.7)" }} /> : "🧑‍🍳"}
+          </Box>
+
+          {/* Text */}
+          {!chatOpen ? (
+            <Box>
+              <Typography sx={{ color: "#fff", fontWeight: 800, fontSize: "0.85rem", lineHeight: 1.25, letterSpacing: "-0.1px", whiteSpace: "nowrap" }}>
+                Your Chef Buddy
+              </Typography>
+              <Typography sx={{ color: "rgba(255,255,255,0.6)", fontSize: "0.68rem", fontWeight: 500, lineHeight: 1.2, whiteSpace: "nowrap" }}>
+                Ask me anything ✨
+              </Typography>
+            </Box>
+          ) : (
+            <Typography sx={{ color: "rgba(255,255,255,0.6)", fontWeight: 600, fontSize: "0.8rem", whiteSpace: "nowrap" }}>
+              Close
+            </Typography>
+          )}
+        </Box>
+      </Box>
 
       {/* ── SIDEBAR ── */}
       <Box sx={{
@@ -3546,13 +4270,99 @@ const exportRecipePDF = (recipe, servingMult = 1) => {
                         </Box>
                         <Grid container spacing={3}>
                           <Grid item xs={12} md={5}>
-                            <Typography variant="h6" fontWeight={800} mb={1.5} color="#1a1a1a">🧂 Ingredients</Typography>
-                            <Box component="ul" sx={{ pl: 2, m: 0 }}>
-                              {recipeByName.ingredients?.main?.map((ing, idx) => (
-                                <Box component="li" key={idx} sx={{ mb: 0.8 }}>
-                                  <Typography fontSize="0.9rem" color="#374151"><Box component="span" fontWeight={600}>{ing.quantity}</Box> {ing.name}</Typography>
+                            <Typography variant="h6" fontWeight={800} mb={1} color="#1a1a1a">🧂 Ingredients</Typography>
+
+                            {/* Pantry summary bar */}
+                            {(() => {
+                              const ings = recipeByName.ingredients?.main || [];
+                              const inPantryCount = ings.filter(i => isInPantryFuzzy(i.name)).length;
+                              const missing = ings.filter(i => !isInPantryFuzzy(i.name));
+                              return (
+                                <Box display="flex" alignItems="center" gap={1} mb={1.5} flexWrap="wrap">
+                                  <Chip
+                                    label={`● ${inPantryCount}/${ings.length} in pantry`}
+                                    size="small"
+                                    sx={{ background: "#f0fdf4", color: "#15803d", border: "1px solid #86efac", fontWeight: 700, fontSize: "0.72rem" }}
+                                  />
+                                  {missing.length > 0 && (
+                                    <Chip
+                                      icon={<AddShoppingCartIcon sx={{ fontSize: "14px !important" }} />}
+                                      label={`ADD ${missing.length} MISSING TO GROCERY LIST`}
+                                      size="small"
+                                      onClick={() => addAllMissingToGrocery(ings)}
+                                      sx={{
+                                        background: "#fff", color: "#1d4ed8",
+                                        border: "1.5px solid #93c5fd", fontWeight: 700, fontSize: "0.68rem",
+                                        cursor: "pointer",
+                                        "&:hover": { background: "#eff6ff" },
+                                      }}
+                                    />
+                                  )}
                                 </Box>
-                              ))}
+                              );
+                            })()}
+
+                            {/* Ingredient rows */}
+                            <Box sx={{ borderRadius: 2, overflow: "hidden", border: "1px solid #f3f4f6" }}>
+                              {recipeByName.ingredients?.main?.map((ing, idx) => {
+                                const inPantry  = isInPantryFuzzy(ing.name);
+                                const inGrocery = isInGroceryList(ing.name);
+                                return (
+                                  <Box key={idx} sx={{
+                                    px: 2, py: 1.2,
+                                    display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap",
+                                    borderBottom: idx < (recipeByName.ingredients.main.length - 1) ? "1px solid #f9fafb" : "none",
+                                    background: inPantry ? "#f0fdf4" : inGrocery ? "#eff6ff" : "#fff",
+                                    transition: "background 0.15s",
+                                  }}>
+                                    {/* Status dot */}
+                                    <Box sx={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0, background: inPantry ? "#22c55e" : inGrocery ? "#3b82f6" : "#e5e7eb" }} />
+
+                                    {/* Name + qty */}
+                                    <Typography fontSize="0.88rem" flex={1} fontWeight={inPantry ? 600 : 400} color={inPantry ? "#15803d" : "#374151"}>
+                                      <Box component="span" fontWeight={700}>{ing.quantity} </Box>{ing.name}
+                                    </Typography>
+
+                                    {/* Badges + actions */}
+                                    <Box display="flex" alignItems="center" gap={0.8} flexShrink={0}>
+                                      {inPantry ? (
+                                        <Chip label="✓ In pantry" size="small" sx={{ background: "#dcfce7", color: "#15803d", border: "1px solid #86efac", fontWeight: 700, fontSize: "0.65rem", height: 20 }} />
+                                      ) : inGrocery ? (
+                                        <>
+                                          <Chip label="🛒 In grocery list" size="small" sx={{ background: "#dbeafe", color: "#1d4ed8", border: "1px solid #93c5fd", fontWeight: 700, fontSize: "0.65rem", height: 20 }} />
+                                          <Tooltip title="Remove from grocery list">
+                                            <IconButton size="small" onClick={() => removeFromGroceryList(ing.name)}
+                                              sx={{ color: "#93c5fd", "&:hover": { color: "#6b8c5a" }, p: 0.3 }}>
+                                              <RemoveShoppingCartIcon sx={{ fontSize: 13 }} />
+                                            </IconButton>
+                                          </Tooltip>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <Tooltip title="Add to pantry">
+                                            <IconButton size="small" onClick={() => addIngredientToPantry(ing)}
+                                              sx={{ color: "#d1d5db", "&:hover": { color: "#22c55e", background: "#f0fdf4" }, p: 0.4, borderRadius: 1 }}>
+                                              <InventoryIcon sx={{ fontSize: 14 }} />
+                                            </IconButton>
+                                          </Tooltip>
+                                          <Tooltip title="Add to grocery list">
+                                            <IconButton size="small" onClick={() => addToGroceryList(ing)}
+                                              sx={{ color: "#d1d5db", "&:hover": { color: "#3b82f6", background: "#eff6ff" }, p: 0.4, borderRadius: 1 }}>
+                                              <AddShoppingCartIcon sx={{ fontSize: 14 }} />
+                                            </IconButton>
+                                          </Tooltip>
+                                        </>
+                                      )}
+                                      <Tooltip title={`Substitute ${ing.name}`}>
+                                        <IconButton size="small" onClick={() => setSubModal({ open: true, ingredient: ing.name })}
+                                          sx={{ color: "#d1d5db", "&:hover": { color: "#b8714e" }, p: 0.4 }}>
+                                          <SwapHorizIcon sx={{ fontSize: 14 }} />
+                                        </IconButton>
+                                      </Tooltip>
+                                    </Box>
+                                  </Box>
+                                );
+                              })}
                             </Box>
                           </Grid>
                           <Grid item xs={12} md={7}>
@@ -4161,9 +4971,27 @@ const exportRecipePDF = (recipe, servingMult = 1) => {
               ) : (
                 <Box sx={{ background: "#fff", borderRadius: 3, border: "1px solid #f3f4f6", overflow: "hidden" }}>
                   <Box px={3} py={2} sx={{ background: "#f9fafb", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                    <Typography fontWeight={700} color="#374151">
-                      Pantry Items ({pantryItems.filter(i => i.inStock).length}/{pantryItems.length} in stock)
-                    </Typography>
+                    <Box display="flex" alignItems="center" gap={1.5}>
+                      <Typography fontWeight={700} color="#374151">
+                        Pantry Items ({pantryItems.filter(i => i.inStock).length}/{pantryItems.length} in stock)
+                      </Typography>
+                      {lowStockItems.filter(i => !dismissedLowStock.has(i.name)).length > 0 && (
+                        <Box
+                          onClick={() => setNotifPanelOpen(true)}
+                          sx={{
+                            display: "flex", alignItems: "center", gap: 0.6,
+                            background: "rgba(234,179,8,0.12)", border: "1px solid rgba(234,179,8,0.35)",
+                            borderRadius: "12px", px: 1.2, py: 0.3, cursor: "pointer",
+                            "&:hover": { background: "rgba(234,179,8,0.2)" },
+                          }}
+                        >
+                          <NotificationsActiveIcon sx={{ fontSize: 13, color: "#eab308" }} />
+                          <Typography sx={{ fontSize: "0.68rem", fontWeight: 800, color: "#ca8a04" }}>
+                            {lowStockItems.filter(i => !dismissedLowStock.has(i.name)).length} low stock
+                          </Typography>
+                        </Box>
+                      )}
+                    </Box>
                     <Button size="small" onClick={() => setPantryItems([])} sx={{ color: "#6b8c5a", fontSize: "0.75rem" }}>Clear all</Button>
                   </Box>
 
@@ -4174,44 +5002,102 @@ const exportRecipePDF = (recipe, servingMult = 1) => {
                         <Typography variant="caption" fontWeight={800} color="#15803d" sx={{ textTransform: "uppercase", letterSpacing: "0.08em", fontSize: "0.65rem" }}>✅ In Stock</Typography>
                         <Typography variant="caption" color="#6b7280" fontSize="0.62rem">tap − to consume, + to restock</Typography>
                       </Box>
-                      {pantryItems.map((item, idx) => !item.inStock ? null : (
-                        <Box key={idx} sx={{ px: 3, py: 1.5, display: "flex", alignItems: "center", gap: 2, borderBottom: "1px solid #f9fafb", "&:hover": { background: "#fafafa" } }}>
-                          <IconButton size="small" onClick={() => togglePantryItem(idx)} sx={{ color: "#22c55e", p: 0.3, flexShrink: 0 }}>
-                            <CheckBoxIcon sx={{ fontSize: 22 }} />
-                          </IconButton>
+                      {pantryItems.map((item, idx) => {
+                        if (!item.inStock) return null;
+                        const lowStatus = getLowStockStatus(item);
+                        const isDismissed = dismissedLowStock.has(item.name);
+                        const showLowWarning = lowStatus && !isDismissed;
+                        return (
+                          <Box key={idx} sx={{
+                            px: 3, py: 1.5, display: "flex", alignItems: "center", gap: 2,
+                            borderBottom: showLowWarning
+                              ? "1px solid rgba(234,179,8,0.18)"
+                              : "1px solid #f9fafb",
+                            background: showLowWarning ? "rgba(254,252,232,0.6)" : "transparent",
+                            "&:hover": { background: showLowWarning ? "rgba(254,252,232,0.9)" : "#fafafa" },
+                            transition: "background 0.15s",
+                          }}>
+                            <IconButton size="small" onClick={() => togglePantryItem(idx)} sx={{ color: "#22c55e", p: 0.3, flexShrink: 0 }}>
+                              <CheckBoxIcon sx={{ fontSize: 22 }} />
+                            </IconButton>
 
-                          {/* Item name */}
-                          <Typography fontSize="0.9rem" color="#374151" fontWeight={600} flex={1}>
-                            {item.name}
-                            {item.unit && <Box component="span" color="#9ca3af" fontWeight={400} fontSize="0.78rem"> ({item.unit})</Box>}
-                          </Typography>
+                            {/* Item name + low-stock badge */}
+                            <Box flex={1} minWidth={0}>
+                              <Box display="flex" alignItems="center" gap={1} flexWrap="wrap">
+                                <Typography fontSize="0.9rem" color="#374151" fontWeight={600}>
+                                  {item.name}
+                                  {item.unit && <Box component="span" color="#9ca3af" fontWeight={400} fontSize="0.78rem"> ({item.unit})</Box>}
+                                </Typography>
+                                {showLowWarning && (
+                                  <Tooltip title={getLowStockMessage(item)} arrow placement="top">
+                                    <Box sx={{
+                                      display: "inline-flex", alignItems: "center", gap: 0.4,
+                                      background: "rgba(234,179,8,0.15)", border: "1px solid rgba(234,179,8,0.35)",
+                                      borderRadius: "8px", px: 0.8, py: 0.2, cursor: "help",
+                                    }}>
+                                      <Typography sx={{ fontSize: "0.62rem", fontWeight: 800, color: "#b45309" }}>⚠ Low stock</Typography>
+                                    </Box>
+                                  </Tooltip>
+                                )}
+                              </Box>
+                            </Box>
 
-                          {/* Quantity stepper */}
-                          <Box display="flex" alignItems="center" gap={0.5} sx={{ background: "#f9fafb", borderRadius: 2, border: "1px solid #e5e7eb", px: 0.5, py: 0.3 }}>
-                            <IconButton
-                              size="small"
-                              onClick={() => updatePantryQty(idx, -1)}
-                              sx={{ width: 26, height: 26, borderRadius: 1.5, background: "#f0f3ec", color: "#6b8c5a", fontWeight: 800, fontSize: "1rem", "&:hover": { background: "#e4ede0" } }}
-                            >−</IconButton>
-                            <TextField
-                              value={item.qty || "0"}
-                              onChange={e => setPantryQtyDirect(idx, e.target.value)}
-                              size="small"
-                              inputProps={{ min: 0, step: "any", style: { textAlign: "center", fontWeight: 700, fontSize: "0.88rem", padding: "2px 0", width: 38 } }}
-                              sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1, "& fieldset": { border: "none" } }, "& .MuiOutlinedInput-input": { px: 0.5 } }}
-                            />
-                            <IconButton
-                              size="small"
-                              onClick={() => updatePantryQty(idx, 1)}
-                              sx={{ width: 26, height: 26, borderRadius: 1.5, background: "#f0fdf4", color: "#22c55e", fontWeight: 800, fontSize: "1rem", "&:hover": { background: "#dcfce7" } }}
-                            >+</IconButton>
+                            {/* Quantity stepper */}
+                            <Box display="flex" alignItems="center" gap={0.5} sx={{
+                              background: showLowWarning ? "rgba(254,243,199,0.8)" : "#f9fafb",
+                              borderRadius: 2,
+                              border: showLowWarning ? "1px solid rgba(234,179,8,0.4)" : "1px solid #e5e7eb",
+                              px: 0.5, py: 0.3,
+                            }}>
+                              <IconButton
+                                size="small"
+                                onClick={() => updatePantryQty(idx, -1)}
+                                sx={{ width: 26, height: 26, borderRadius: 1.5, background: "#f0f3ec", color: "#6b8c5a", fontWeight: 800, fontSize: "1rem", "&:hover": { background: "#e4ede0" } }}
+                              >−</IconButton>
+                              <TextField
+                                value={item.qty || "0"}
+                                onChange={e => setPantryQtyDirect(idx, e.target.value)}
+                                size="small"
+                                inputProps={{ min: 0, step: "any", style: { textAlign: "center", fontWeight: 700, fontSize: "0.88rem", padding: "2px 0", width: 38 } }}
+                                sx={{ "& .MuiOutlinedInput-root": { borderRadius: 1, "& fieldset": { border: "none" } }, "& .MuiOutlinedInput-input": { px: 0.5 } }}
+                              />
+                              <IconButton
+                                size="small"
+                                onClick={() => updatePantryQty(idx, 1)}
+                                sx={{ width: 26, height: 26, borderRadius: 1.5, background: "#f0fdf4", color: "#22c55e", fontWeight: 800, fontSize: "1rem", "&:hover": { background: "#dcfce7" } }}
+                              >+</IconButton>
+                            </Box>
+
+                            {/* Low-stock quick action: add to grocery */}
+                            {showLowWarning && (
+                              <Tooltip title="Add to grocery list">
+                                <IconButton
+                                  size="small"
+                                  onClick={() => {
+                                    if (!isInGroceryList(item.name)) {
+                                      setGroceryList(prev => [...prev, { name: item.name, qty: item.qty, unit: item.unit, addedFrom: "Pantry alert" }]);
+                                      showToast(`"${item.name}" added to grocery list 🛒`, "success");
+                                    } else {
+                                      showToast(`"${item.name}" is already in your grocery list`, "info");
+                                    }
+                                    setDismissedLowStock(prev => new Set([...prev, item.name]));
+                                  }}
+                                  sx={{
+                                    color: "#d1d5db", flexShrink: 0,
+                                    "&:hover": { color: "#eab308", background: "rgba(234,179,8,0.1)" },
+                                  }}
+                                >
+                                  <AddShoppingCartIcon sx={{ fontSize: 16 }} />
+                                </IconButton>
+                              </Tooltip>
+                            )}
+
+                            <IconButton size="small" onClick={() => removePantryItem(idx)} sx={{ color: "#d1d5db", flexShrink: 0, "&:hover": { color: "#6b8c5a" } }}>
+                              <DeleteIcon sx={{ fontSize: 18 }} />
+                            </IconButton>
                           </Box>
-
-                          <IconButton size="small" onClick={() => removePantryItem(idx)} sx={{ color: "#d1d5db", flexShrink: 0, "&:hover": { color: "#6b8c5a" } }}>
-                            <DeleteIcon sx={{ fontSize: 18 }} />
-                          </IconButton>
-                        </Box>
-                      ))}
+                        );
+                      })}
                     </Box>
                   )}
 
