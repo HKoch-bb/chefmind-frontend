@@ -298,8 +298,9 @@ const LanguagePill = ({ value, onChange, accentColor = "#6b8c5a", accentBg = "#f
 
 // ─── Image Scan Button (Ingredient Detection from Photo) ──────────────────────
 const ImageScanButton = ({ onConfirm, accentColor = "#b8714e" }) => {
-  const API = "http://localhost:5000";
-  const fileRef = useRef();
+//  const API = "http://localhost:5000";
+const API = process.env.REACT_APP_API_URL || "http://localhost:5000";  
+const fileRef = useRef();
   const [scanning, setScanning] = useState(false);
   const [preview, setPreview] = useState({ open: false, imageSrc: null, detected: [], description: "" });
   const [selected, setSelected] = useState([]);
