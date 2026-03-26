@@ -3654,10 +3654,24 @@ const exportRecipePDF = (recipe, servingMult = 1) => {
             <Box display="flex" alignItems="center" gap={1}>
               <Box sx={{
                 width: 34, height: 34, borderRadius: 2, flexShrink: 0,
-                background: "linear-gradient(135deg, #5a7c4a, #4a6a3a)",
-                display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: 900, color: "#fff",
-                boxShadow: "0 4px 12px rgba(107,140,90,0.35)",
-              }}>M</Box>
+                background: "linear-gradient(145deg, #4a7a3a 0%, #5a7c4a 50%, #3d6b2a 100%)",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                boxShadow: "0 4px 14px rgba(107,140,90,0.45), inset 0 1px 0 rgba(255,255,255,0.15)",
+                overflow: "hidden", position: "relative",
+              }}>
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                  {/* Fridge body */}
+                  <rect x="4" y="2" width="12" height="16" rx="2" fill="rgba(255,255,255,0.18)" stroke="rgba(255,255,255,0.5)" strokeWidth="0.8"/>
+                  {/* Freezer divider */}
+                  <rect x="4" y="7.5" width="12" height="0.8" fill="rgba(255,255,255,0.4)"/>
+                  {/* Freezer handle */}
+                  <rect x="6" y="4.5" width="4" height="1.2" rx="0.6" fill="rgba(255,255,255,0.7)"/>
+                  {/* Fridge handle */}
+                  <rect x="6" y="10.5" width="4" height="1.2" rx="0.6" fill="rgba(255,255,255,0.7)"/>
+                  {/* Little glow dot — fresh food indicator */}
+                  <circle cx="13.5" cy="13.5" r="1" fill="#86efac"/>
+                </svg>
+              </Box>
               <Box>
                 <Typography sx={{ fontWeight: 900, fontSize: "1.1rem", color: "#fff", letterSpacing: "-0.5px", lineHeight: 1.1 }}>
                   Fridgely
@@ -3671,10 +3685,19 @@ const exportRecipePDF = (recipe, servingMult = 1) => {
           {!sidebarOpen && (
             <Box sx={{
               width: 34, height: 34, borderRadius: 2,
-              background: "linear-gradient(135deg, #5a7c4a, #4a6a3a)",
-              display: "flex", alignItems: "center", justifyContent: "center", fontSize: "1rem", fontWeight: 900, color: "#fff",
-              boxShadow: "0 4px 12px rgba(107,140,90,0.35)",
-            }}>M</Box>
+              background: "linear-gradient(145deg, #4a7a3a 0%, #5a7c4a 50%, #3d6b2a 100%)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              boxShadow: "0 4px 14px rgba(107,140,90,0.45), inset 0 1px 0 rgba(255,255,255,0.15)",
+              overflow: "hidden",
+            }}>
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <rect x="4" y="2" width="12" height="16" rx="2" fill="rgba(255,255,255,0.18)" stroke="rgba(255,255,255,0.5)" strokeWidth="0.8"/>
+                <rect x="4" y="7.5" width="12" height="0.8" fill="rgba(255,255,255,0.4)"/>
+                <rect x="6" y="4.5" width="4" height="1.2" rx="0.6" fill="rgba(255,255,255,0.7)"/>
+                <rect x="6" y="10.5" width="4" height="1.2" rx="0.6" fill="rgba(255,255,255,0.7)"/>
+                <circle cx="13.5" cy="13.5" r="1" fill="#86efac"/>
+              </svg>
+            </Box>
           )}
           {sidebarOpen && (
             <IconButton onClick={() => setSidebarOpen(false)} size="small"
@@ -3827,17 +3850,120 @@ const exportRecipePDF = (recipe, servingMult = 1) => {
                 </Box>
               </Box>
 
-              {/* Floating recipe card */}
-              <Box sx={{ display: { xs: "none", lg: "flex" }, position: "absolute", right: 80, top: "50%", transform: "translateY(-50%) rotate(2deg)", flexDirection: "column", background: "rgba(255,255,255,0.09)", backdropFilter: "blur(20px)", border: "1px solid rgba(255,255,255,0.18)", borderRadius: "20px", p: 2.5, width: 220, zIndex: 2, boxShadow: "0 24px 64px rgba(0,0,0,0.4)" }}>
-                <Box component="img" src="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&q=80" alt="recipe" sx={{ width: "100%", height: 130, objectFit: "cover", borderRadius: "12px", mb: 1.5 }} />
-                <Typography sx={{ color: "rgba(255,255,255,0.4)", fontSize: "0.6rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", mb: 0.4 }}>Made from what you had</Typography>
-                <Typography sx={{ color: "#fff", fontWeight: 700, fontSize: "0.88rem", mb: 0.5 }}>Golden Veggie Stir-Fry</Typography>
-                <Typography sx={{ color: "rgba(255,255,255,0.55)", fontSize: "0.75rem", mb: 1.5, lineHeight: 1.4 }}>Crispy, colourful, done in 20 minutes flat.</Typography>
-                <Box display="flex" gap={0.8}>
-                  {["🟢 Easy", "⚡ Quick"].map((tag, i) => (
-                    <Box key={i} sx={{ background: "rgba(184,113,78,0.2)", border: "1px solid rgba(184,113,78,0.35)", borderRadius: "6px", px: 0.9, py: 0.3, fontSize: "0.65rem", fontWeight: 700, color: "#c4b08a" }}>{tag}</Box>
-                  ))}
+              {/* ── Three recipe cards — zig-zag staircase ── */}
+              <Box sx={{
+                display: { xs: "none", lg: "block" },
+                position: "absolute", right: 50, top: "50%",
+                transform: "translateY(-50%)",
+                width: 290, height: 500,
+                zIndex: 2,
+              }}>
+
+                {/* Card 1 — top-left, Breakfast */}
+                <Box sx={{
+                  position: "absolute", top: 0, left: 0,
+                  width: 212, borderRadius: "18px",
+                  background: "rgba(255,255,255,0.08)",
+                  backdropFilter: "blur(20px)",
+                  border: "1px solid rgba(255,255,255,0.15)",
+                  boxShadow: "0 16px 48px rgba(0,0,0,0.5)",
+                  transform: "rotate(-5deg)",
+                  overflow: "hidden",
+                  transition: "transform 0.3s ease, box-shadow 0.3s ease",
+                  "&:hover": { transform: "rotate(-2deg) translateY(-5px)", boxShadow: "0 24px 60px rgba(0,0,0,0.55)" },
+                }}>
+                  <Box component="img"
+                    src="https://images.unsplash.com/photo-1567620905732-2d1ec7ab7445?w=400&q=80"
+                    sx={{ width: "100%", height: 95, objectFit: "cover", display: "block" }}
+                  />
+                  <Box sx={{ position: "absolute", top: 0, left: 0, right: 0, height: 95, background: "linear-gradient(to bottom, transparent 50%, rgba(0,0,0,0.3) 100%)" }} />
+                  {/* Ready badge */}
+                  <Box sx={{ position: "absolute", top: 10, right: 10, display: "flex", alignItems: "center", gap: 0.5, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(6px)", borderRadius: "8px", px: 1, py: 0.35 }}>
+                    <Box sx={{ width: 5, height: 5, borderRadius: "50%", background: "#22c55e", boxShadow: "0 0 6px #22c55e", animation: "lp 2s ease-in-out infinite", "@keyframes lp": { "0%,100%": { opacity: 1 }, "50%": { opacity: 0.3 } } }} />
+                    <Typography sx={{ color: "#86efac", fontSize: "0.58rem", fontWeight: 800 }}>Ready to cook</Typography>
+                  </Box>
+                  <Box sx={{ px: 1.8, py: 1.3 }}>
+                    <Typography sx={{ color: "rgba(255,255,255,0.42)", fontSize: "0.55rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", mb: 0.4 }}>☀️ Breakfast · 3 ingredients</Typography>
+                    <Typography sx={{ color: "#fff", fontWeight: 800, fontSize: "0.86rem", mb: 0.4 }}>Fluffy Pancakes</Typography>
+                    <Typography sx={{ color: "rgba(255,255,255,0.45)", fontSize: "0.7rem", mb: 0.9, lineHeight: 1.4 }}>Golden, soft, ready in 12 min.</Typography>
+                    <Box display="flex" gap={0.7}>
+                      {["🟢 Easy", "⏱ 12 min"].map((tag, i) => (
+                        <Box key={i} sx={{ background: "rgba(184,113,78,0.22)", border: "1px solid rgba(184,113,78,0.38)", borderRadius: "6px", px: 0.9, py: 0.25, fontSize: "0.6rem", fontWeight: 700, color: "#c4b08a" }}>{tag}</Box>
+                      ))}
+                    </Box>
+                  </Box>
                 </Box>
+
+                {/* Card 2 — middle-right, Lunch */}
+                <Box sx={{
+                  position: "absolute", top: 162, left: 68,
+                  width: 215, borderRadius: "18px",
+                  background: "rgba(255,255,255,0.09)",
+                  backdropFilter: "blur(22px)",
+                  border: "1px solid rgba(255,255,255,0.16)",
+                  boxShadow: "0 18px 50px rgba(0,0,0,0.5)",
+                  transform: "rotate(5deg)",
+                  overflow: "hidden",
+                  transition: "transform 0.3s ease, box-shadow 0.3s ease",
+                  "&:hover": { transform: "rotate(2deg) translateY(-5px)", boxShadow: "0 26px 62px rgba(0,0,0,0.55)" },
+                }}>
+                  <Box component="img"
+                    src="https://images.unsplash.com/photo-1540189549336-e6e99c3679fe?w=400&q=80"
+                    sx={{ width: "100%", height: 95, objectFit: "cover", display: "block" }}
+                  />
+                  <Box sx={{ position: "absolute", top: 0, left: 0, right: 0, height: 95, background: "linear-gradient(to bottom, transparent 50%, rgba(0,0,0,0.3) 100%)" }} />
+                  {/* Ready badge */}
+                  <Box sx={{ position: "absolute", top: 10, right: 10, display: "flex", alignItems: "center", gap: 0.5, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(6px)", borderRadius: "8px", px: 1, py: 0.35 }}>
+                    <Box sx={{ width: 5, height: 5, borderRadius: "50%", background: "#22c55e", boxShadow: "0 0 6px #22c55e", animation: "lp 2s ease-in-out 0.4s infinite" }} />
+                    <Typography sx={{ color: "#86efac", fontSize: "0.58rem", fontWeight: 800 }}>Ready to cook</Typography>
+                  </Box>
+                  <Box sx={{ px: 1.8, py: 1.3 }}>
+                    <Typography sx={{ color: "rgba(255,255,255,0.42)", fontSize: "0.55rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", mb: 0.4 }}>🌿 Lunch · 5 ingredients</Typography>
+                    <Typography sx={{ color: "#fff", fontWeight: 800, fontSize: "0.86rem", mb: 0.4 }}>Herb Garden Bowl</Typography>
+                    <Typography sx={{ color: "rgba(255,255,255,0.45)", fontSize: "0.7rem", mb: 0.9, lineHeight: 1.4 }}>Fresh, crisp, zero cooking needed.</Typography>
+                    <Box display="flex" gap={0.7}>
+                      {["🌱 Vegan", "⚡ No-cook"].map((tag, i) => (
+                        <Box key={i} sx={{ background: i === 0 ? "rgba(34,197,94,0.18)" : "rgba(184,113,78,0.22)", border: `1px solid ${i === 0 ? "rgba(34,197,94,0.3)" : "rgba(184,113,78,0.38)"}`, borderRadius: "6px", px: 0.9, py: 0.25, fontSize: "0.6rem", fontWeight: 700, color: i === 0 ? "#86efac" : "#c4b08a" }}>{tag}</Box>
+                      ))}
+                    </Box>
+                  </Box>
+                </Box>
+
+                {/* Card 3 — bottom-left, Dinner */}
+                <Box sx={{
+                  position: "absolute", top: 330, left: 8,
+                  width: 220, borderRadius: "20px",
+                  background: "rgba(255,255,255,0.13)",
+                  backdropFilter: "blur(28px)",
+                  border: "1px solid rgba(255,255,255,0.22)",
+                  boxShadow: "0 24px 60px rgba(0,0,0,0.55)",
+                  transform: "rotate(-4deg)",
+                  overflow: "hidden",
+                  transition: "transform 0.3s ease, box-shadow 0.3s ease",
+                  "&:hover": { transform: "rotate(-1deg) translateY(-5px)", boxShadow: "0 32px 72px rgba(0,0,0,0.6)" },
+                }}>
+                  <Box component="img"
+                    src="https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400&q=80"
+                    sx={{ width: "100%", height: 95, objectFit: "cover", display: "block" }}
+                  />
+                  <Box sx={{ position: "absolute", top: 0, left: 0, right: 0, height: 95, background: "linear-gradient(to bottom, transparent 50%, rgba(0,0,0,0.3) 100%)" }} />
+                  {/* Ready badge */}
+                  <Box sx={{ position: "absolute", top: 10, right: 10, display: "flex", alignItems: "center", gap: 0.5, background: "rgba(0,0,0,0.5)", backdropFilter: "blur(6px)", borderRadius: "8px", px: 1, py: 0.35 }}>
+                    <Box sx={{ width: 5, height: 5, borderRadius: "50%", background: "#22c55e", boxShadow: "0 0 6px #22c55e", animation: "lp 2s ease-in-out 0.8s infinite" }} />
+                    <Typography sx={{ color: "#86efac", fontSize: "0.58rem", fontWeight: 800 }}>Ready to cook</Typography>
+                  </Box>
+                  <Box sx={{ px: 2, py: 1.4 }}>
+                    <Typography sx={{ color: "rgba(255,255,255,0.45)", fontSize: "0.55rem", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", mb: 0.35 }}>🌙 Dinner · from your fridge</Typography>
+                    <Typography sx={{ color: "#fff", fontWeight: 800, fontSize: "0.9rem", mb: 0.4 }}>Golden Veggie Stir-Fry</Typography>
+                    <Typography sx={{ color: "rgba(255,255,255,0.5)", fontSize: "0.7rem", mb: 0.9, lineHeight: 1.4 }}>Crispy, colourful, 20 min flat.</Typography>
+                    <Box display="flex" gap={0.7}>
+                      {["🟢 Easy", "⚡ Quick"].map((tag, i) => (
+                        <Box key={i} sx={{ background: "rgba(184,113,78,0.25)", border: "1px solid rgba(184,113,78,0.4)", borderRadius: "6px", px: 0.9, py: 0.25, fontSize: "0.6rem", fontWeight: 700, color: "#c4b08a" }}>{tag}</Box>
+                      ))}
+                    </Box>
+                  </Box>
+                </Box>
+
               </Box>
             </Box>
 
