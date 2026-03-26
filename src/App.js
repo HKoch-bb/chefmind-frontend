@@ -2517,12 +2517,19 @@ export default function App() {
   // ── Recipe details ──
   const fetchDetails = async (title) => {
     setOpen(true); setServingMultiplier(1);
-    // Track in history
+    // Track in history — increment viewCount if already seen, expire after 30 days, cap at 30
     setRecipeHistory(prev => {
-      const filtered = prev.filter(h => h.title !== title);
-      const newEntry = { title, viewedAt: new Date().toISOString() };
-      const updated = [newEntry, ...filtered].slice(0, 50);
-      return updated;
+      const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000;
+      const existing = prev.find(h => h.title === title);
+      const entry = {
+        title,
+        viewedAt: new Date().toISOString(),
+        viewCount: existing ? (existing.viewCount || 1) + 1 : 1,
+        firstViewedAt: existing?.firstViewedAt || new Date().toISOString(),
+      };
+      return [entry, ...prev.filter(h => h.title !== title)]
+        .filter(h => new Date(h.viewedAt).getTime() > thirtyDaysAgo)
+        .slice(0, 30);
     });
     if (recipeCache[title]) { setDetails(recipeCache[title]); return; }
     setDetails(null); setDetailsLoading(true);
@@ -3730,25 +3737,6 @@ const exportRecipePDF = (recipe, servingMult = 1) => {
             {sidebarOpen && (
               <Typography variant="caption" sx={{ color: "#a8c298", fontWeight: 700, whiteSpace: "nowrap" }}>
                 {savedRecipes.length} saved recipe{savedRecipes.length !== 1 ? "s" : ""}
-              </Typography>
-            )}
-          </Box>
-        )}
-        {recipeHistory.length > 0 && (
-          <Box onClick={() => setHistoryOpen(true)} sx={{
-            mx: sidebarOpen ? 1.5 : 1, mb: 1, flexShrink: 0,
-            p: sidebarOpen ? 1.5 : 1,
-            background: "rgba(184,113,78,0.1)", borderRadius: 2,
-            border: "1px solid rgba(184,113,78,0.2)",
-            display: "flex", alignItems: "center",
-            justifyContent: sidebarOpen ? "flex-start" : "center",
-            gap: 1, overflow: "hidden", cursor: "pointer",
-            "&:hover": { background: "rgba(184,113,78,0.2)" },
-          }}>
-            <HistoryIcon sx={{ fontSize: sidebarOpen ? "0.9rem" : "1rem", color: "#b8714e", flexShrink: 0 }} />
-            {sidebarOpen && (
-              <Typography variant="caption" sx={{ color: "#c4b08a", fontWeight: 700, whiteSpace: "nowrap" }}>
-                {recipeHistory.length} recently viewed
               </Typography>
             )}
           </Box>
@@ -5450,98 +5438,249 @@ const exportRecipePDF = (recipe, servingMult = 1) => {
         })()}
 
         {/* ── RECIPE HISTORY PAGE ── */}
-        {page === "history" && (
-          <Box sx={{ minHeight: "100vh", background: "linear-gradient(160deg, #141210 0%, #1a1814 100%)", position: "relative" }}>
-            <Box sx={{ position: "relative", zIndex: 1, overflow: "hidden", background: "linear-gradient(125deg, #161410 0%, #1e2b1a 40%, #243a1e 70%, #3a5c30 100%)", px: { xs: 4, md: 6 }, py: 4.5 }}>
-              <Box display="flex" alignItems="flex-end" justifyContent="space-between" flexWrap="wrap" gap={2}>
-                <Box>
-                  <Box sx={{ display: "inline-flex", alignItems: "center", gap: 1, background: "rgba(184,113,78,0.2)", border: "1px solid rgba(184,113,78,0.4)", borderRadius: "100px", px: 2, py: 0.5, mb: 2 }}>
-                    <HistoryIcon sx={{ fontSize: 12, color: "#b8714e" }} />
-                    <Typography sx={{ color: "#c4b08a", fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase" }}>Recently Viewed</Typography>
+        {page === "history" && (() => {
+          // ── Smart grouping ──
+          const now = Date.now();
+          const todayStart     = new Date(); todayStart.setHours(0,0,0,0);
+          const yesterdayStart = new Date(todayStart); yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+          const weekStart      = new Date(todayStart); weekStart.setDate(weekStart.getDate() - 7);
+
+          const groups = [
+            { label: "Today",      icon: "☀️", items: [] },
+            { label: "Yesterday",  icon: "🌙", items: [] },
+            { label: "This Week",  icon: "📅", items: [] },
+            { label: "Earlier",    icon: "🗂️", items: [] },
+          ];
+
+          recipeHistory.forEach(item => {
+            const t = new Date(item.viewedAt).getTime();
+            if      (t >= todayStart.getTime())     groups[0].items.push(item);
+            else if (t >= yesterdayStart.getTime()) groups[1].items.push(item);
+            else if (t >= weekStart.getTime())      groups[2].items.push(item);
+            else                                    groups[3].items.push(item);
+          });
+
+          const filledGroups = groups.filter(g => g.items.length > 0);
+
+          const topRecipes = [...recipeHistory]
+            .sort((a, b) => (b.viewCount || 1) - (a.viewCount || 1))
+            .slice(0, 3);
+
+          const timeAgo = (iso) => {
+            const diff = now - new Date(iso).getTime();
+            const mins = Math.floor(diff / 60000);
+            if (mins < 1)  return "just now";
+            if (mins < 60) return `${mins}m ago`;
+            const hrs = Math.floor(mins / 60);
+            if (hrs < 24)  return `${hrs}h ago`;
+            const days = Math.floor(hrs / 24);
+            if (days === 1) return "yesterday";
+            if (days < 7)  return `${days} days ago`;
+            return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+          };
+
+          return (
+            <Box sx={{ minHeight: "100vh", background: "linear-gradient(160deg, #141210 0%, #1a1814 100%)" }}>
+              {/* Header */}
+              <Box sx={{ overflow: "hidden", background: "linear-gradient(125deg, #161410 0%, #1e2b1a 40%, #243a1e 70%, #3a5c30 100%)", px: { xs: 4, md: 6 }, py: 4.5 }}>
+                <Box display="flex" alignItems="flex-end" justifyContent="space-between" flexWrap="wrap" gap={2}>
+                  <Box>
+                    <Box sx={{ display: "inline-flex", alignItems: "center", gap: 1, background: "rgba(184,113,78,0.2)", border: "1px solid rgba(184,113,78,0.4)", borderRadius: "100px", px: 2, py: 0.5, mb: 2 }}>
+                      <HistoryIcon sx={{ fontSize: 12, color: "#b8714e" }} />
+                      <Typography sx={{ color: "#c4b08a", fontSize: "0.7rem", fontWeight: 700, letterSpacing: "0.12em", textTransform: "uppercase" }}>Your Cooking Journey</Typography>
+                    </Box>
+                    <Typography sx={{ fontWeight: 900, fontSize: { xs: "1.8rem", md: "2.4rem" }, letterSpacing: "-1.5px", color: "#fff", lineHeight: 1.1, mb: 1 }}>
+                      🕐 Recipe History
+                    </Typography>
+                    <Typography sx={{ color: "rgba(255,255,255,0.5)", fontSize: "0.95rem" }}>
+                      {recipeHistory.length} recipe{recipeHistory.length !== 1 ? "s" : ""} explored
+                      {recipeHistory.length > 0 && ` · last 30 days · ${savedRecipes.length} saved`}
+                    </Typography>
                   </Box>
-                  <Typography sx={{ fontWeight: 900, fontSize: { xs: "1.8rem", md: "2.4rem" }, letterSpacing: "-1.5px", color: "#fff", lineHeight: 1.1, mb: 1 }}>🕐 Recipe History</Typography>
-                  <Typography sx={{ color: "rgba(255,255,255,0.5)", fontSize: "0.95rem" }}>
-                    {recipeHistory.length} recipe{recipeHistory.length !== 1 ? "s" : ""} viewed — click any to reopen
-                  </Typography>
+                  {recipeHistory.length > 0 && (
+                    <Button variant="outlined" size="small"
+                      onClick={() => { setRecipeHistory([]); localStorage.removeItem("recipeHistory"); }}
+                      sx={{ borderColor: "rgba(255,255,255,0.2)", color: "rgba(255,255,255,0.4)", borderRadius: 2, fontWeight: 700 }}>
+                      Clear All
+                    </Button>
+                  )}
                 </Box>
-                {recipeHistory.length > 0 && (
-                  <Button variant="outlined" size="small"
-                    onClick={() => { setRecipeHistory([]); localStorage.removeItem("recipeHistory"); }}
-                    sx={{ borderColor: "rgba(255,255,255,0.2)", color: "rgba(255,255,255,0.5)", borderRadius: 2, fontWeight: 700 }}>
-                    Clear All
-                  </Button>
+              </Box>
+
+              <Box p={4} maxWidth={1000} mx="auto">
+                {recipeHistory.length === 0 ? (
+                  <Box textAlign="center" py={12}>
+                    <Typography fontSize="3rem" mb={2}>🍳</Typography>
+                    <Typography fontWeight={700} color="#6b7280" fontSize="1rem" mb={1}>Nothing cooked up yet</Typography>
+                    <Typography variant="body2" color="#4b5563" mb={3}>Every recipe you open gets tracked here — with how often you come back to it</Typography>
+                    <Button variant="contained" onClick={() => setPage("recipes")}
+                      sx={{ background: "linear-gradient(135deg, #5a7c4a, #4a6a3a)", borderRadius: 2, fontWeight: 700 }}>
+                      Generate Recipes →
+                    </Button>
+                  </Box>
+                ) : (
+                  <Box>
+                    {/* ── Stats row ── */}
+                    <Grid container spacing={2} mb={4}>
+                      {[
+                        { label: "Recipes explored",  val: recipeHistory.length,                                    icon: "🔍", color: "#b8714e", bg: "rgba(184,113,78,0.12)",  border: "rgba(184,113,78,0.25)" },
+                        { label: "Saved to cookbook", val: recipeHistory.filter(h => savedRecipes.some(r => r._title === h.title)).length, icon: "💾", color: "#22c55e", bg: "rgba(34,197,94,0.1)",   border: "rgba(34,197,94,0.22)"  },
+                        { label: "Most viewed",        val: topRecipes[0] ? `"${topRecipes[0].title.split(" ").slice(0,3).join(" ")}…"` : "—", icon: "🔥", color: "#eab308", bg: "rgba(234,179,8,0.1)",   border: "rgba(234,179,8,0.22)"  },
+                        { label: "Rated by you",       val: recipeHistory.filter(h => (recipeRatings[h.title] || 0) > 0).length,          icon: "⭐", color: "#c49a3c", bg: "rgba(196,154,60,0.1)",  border: "rgba(196,154,60,0.22)" },
+                      ].map((s, i) => (
+                        <Grid item xs={6} md={3} key={i}>
+                          <Box sx={{ background: s.bg, border: `1px solid ${s.border}`, borderRadius: 3, p: 2, textAlign: "center" }}>
+                            <Typography sx={{ fontSize: "1.5rem", mb: 0.5 }}>{s.icon}</Typography>
+                            <Typography sx={{ color: s.color, fontWeight: 900, fontSize: i === 2 ? "0.75rem" : "1.5rem", lineHeight: 1.2, mb: 0.3 }}>{s.val}</Typography>
+                            <Typography sx={{ color: "rgba(255,255,255,0.4)", fontSize: "0.68rem", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.06em" }}>{s.label}</Typography>
+                          </Box>
+                        </Grid>
+                      ))}
+                    </Grid>
+
+                    {/* ── Most revisited strip (only if any viewed 2+ times) ── */}
+                    {topRecipes.some(r => (r.viewCount || 1) >= 2) && (
+                      <Box mb={4}>
+                        <Typography sx={{ color: "rgba(255,255,255,0.4)", fontSize: "0.68rem", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.1em", mb: 1.5 }}>
+                          🔥 Your Go-To Recipes
+                        </Typography>
+                        <Box display="flex" gap={1.5} flexWrap="wrap">
+                          {topRecipes.filter(r => (r.viewCount || 1) >= 2).map((item, i) => (
+                            <Box key={i} onClick={() => fetchDetails(item.title)} sx={{
+                              display: "flex", alignItems: "center", gap: 1.2,
+                              background: "rgba(184,113,78,0.12)", border: "1px solid rgba(184,113,78,0.25)",
+                              borderRadius: "100px", pl: 0.6, pr: 2, py: 0.6, cursor: "pointer",
+                              transition: "all 0.15s",
+                              "&:hover": { background: "rgba(184,113,78,0.22)", borderColor: "rgba(184,113,78,0.5)" },
+                            }}>
+                              <Box sx={{ width: 28, height: 28, borderRadius: "50%", overflow: "hidden", flexShrink: 0 }}>
+                                <RecipeImage title={item.title} height={28} />
+                              </Box>
+                              <Typography sx={{ color: "#c4b08a", fontSize: "0.78rem", fontWeight: 700, whiteSpace: "nowrap" }}>{item.title}</Typography>
+                              <Box sx={{ background: "rgba(184,113,78,0.3)", borderRadius: "8px", px: 0.8, py: 0.1 }}>
+                                <Typography sx={{ color: "#b8714e", fontSize: "0.62rem", fontWeight: 800 }}>×{item.viewCount}</Typography>
+                              </Box>
+                            </Box>
+                          ))}
+                        </Box>
+                      </Box>
+                    )}
+
+                    {/* ── Grouped timeline ── */}
+                    {filledGroups.map(group => (
+                      <Box key={group.label} mb={4}>
+                        <Box display="flex" alignItems="center" gap={1.5} mb={2}>
+                          <Typography sx={{ fontSize: "1rem" }}>{group.icon}</Typography>
+                          <Typography sx={{ color: "rgba(255,255,255,0.55)", fontWeight: 800, fontSize: "0.78rem", textTransform: "uppercase", letterSpacing: "0.1em" }}>
+                            {group.label}
+                          </Typography>
+                          <Box sx={{ flex: 1, height: "1px", background: "rgba(255,255,255,0.07)" }} />
+                          <Typography sx={{ color: "rgba(255,255,255,0.25)", fontSize: "0.68rem" }}>
+                            {group.items.length} recipe{group.items.length !== 1 ? "s" : ""}
+                          </Typography>
+                        </Box>
+
+                        <Grid container spacing={2}>
+                          {group.items.map((item, i) => {
+                            const isSaved  = savedRecipes.some(r => r._title === item.title);
+                            const rating   = recipeRatings[item.title] || 0;
+                            const isRepeat = (item.viewCount || 1) >= 2;
+
+                            return (
+                              <Grid item xs={12} sm={6} md={4} key={i}>
+                                <Card sx={{
+                                  borderRadius: 3, overflow: "hidden", cursor: "pointer",
+                                  background: "rgba(255,255,255,0.04)",
+                                  border: "1px solid rgba(255,255,255,0.07)",
+                                  transition: "all 0.2s",
+                                  "&:hover": { background: "rgba(184,113,78,0.09)", borderColor: "rgba(184,113,78,0.3)", transform: "translateY(-3px)", boxShadow: "0 12px 32px rgba(0,0,0,0.4)" },
+                                }}
+                                  onClick={() => fetchDetails(item.title)}>
+
+                                  {/* Thumbnail */}
+                                  <Box sx={{ position: "relative", height: 130, overflow: "hidden" }}>
+                                    <RecipeImage title={item.title} height={130} />
+                                    <Box sx={{ position: "absolute", inset: 0, background: "linear-gradient(to top, rgba(0,0,0,0.6) 0%, transparent 60%)" }} />
+
+                                    {/* Badges */}
+                                    <Box sx={{ position: "absolute", top: 8, left: 8, display: "flex", gap: 0.6 }}>
+                                      {isSaved && (
+                                        <Box sx={{ background: "rgba(34,197,94,0.88)", backdropFilter: "blur(4px)", borderRadius: "6px", px: 0.9, py: 0.25 }}>
+                                          <Typography sx={{ color: "#fff", fontSize: "0.6rem", fontWeight: 800 }}>💾 SAVED</Typography>
+                                        </Box>
+                                      )}
+                                      {isRepeat && (
+                                        <Box sx={{ background: "rgba(184,113,78,0.9)", backdropFilter: "blur(4px)", borderRadius: "6px", px: 0.9, py: 0.25 }}>
+                                          <Typography sx={{ color: "#fff", fontSize: "0.6rem", fontWeight: 800 }}>🔥 ×{item.viewCount}</Typography>
+                                        </Box>
+                                      )}
+                                    </Box>
+
+                                    {/* Time */}
+                                    <Box sx={{ position: "absolute", bottom: 8, right: 8 }}>
+                                      <Typography sx={{ color: "rgba(255,255,255,0.6)", fontSize: "0.62rem", fontWeight: 600 }}>
+                                        {timeAgo(item.viewedAt)}
+                                      </Typography>
+                                    </Box>
+                                  </Box>
+
+                                  {/* Info */}
+                                  <Box px={2} pt={1.5} pb={0.5}>
+                                    <Typography fontWeight={700} color="#fff" fontSize="0.88rem"
+                                      sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", mb: 0.5 }}>
+                                      {item.title}
+                                    </Typography>
+
+                                    {/* Rating row */}
+                                    <Box display="flex" alignItems="center" justifyContent="space-between">
+                                      {rating > 0 ? (
+                                        <Box display="flex" alignItems="center" gap={0.5}>
+                                          {[1,2,3,4,5].map(s => (
+                                            <Box key={s} sx={{ color: s <= rating ? "#c49a3c" : "rgba(255,255,255,0.15)", fontSize: "0.7rem" }}>★</Box>
+                                          ))}
+                                          <Typography sx={{ color: "#c49a3c", fontSize: "0.65rem", fontWeight: 700, ml: 0.3 }}>{rating}/5</Typography>
+                                        </Box>
+                                      ) : (
+                                        <Typography sx={{ color: "rgba(255,255,255,0.2)", fontSize: "0.65rem" }}>Not rated yet</Typography>
+                                      )}
+                                      {item.firstViewedAt && item.viewCount > 1 && (
+                                        <Typography sx={{ color: "rgba(255,255,255,0.2)", fontSize: "0.62rem" }}>
+                                          First seen {timeAgo(item.firstViewedAt)}
+                                        </Typography>
+                                      )}
+                                    </Box>
+                                  </Box>
+
+                                  {/* Actions */}
+                                  <Box px={2} pb={2} pt={1} display="flex" gap={1}>
+                                    <Button size="small" variant="outlined" fullWidth
+                                      onClick={e => { e.stopPropagation(); fetchDetails(item.title); }}
+                                      sx={{ borderColor: "rgba(184,113,78,0.35)", color: "#b8714e", borderRadius: 2, fontSize: "0.73rem", fontWeight: 700, py: 0.5 }}>
+                                      Open Recipe
+                                    </Button>
+                                    {!isSaved && (
+                                      <Tooltip title="Save to cookbook">
+                                        <IconButton size="small"
+                                          onClick={e => { e.stopPropagation(); fetchDetails(item.title); setTimeout(() => saveRecipe(), 800); }}
+                                          sx={{ color: "rgba(255,255,255,0.25)", "&:hover": { color: "#22c55e" }, border: "1px solid rgba(255,255,255,0.08)", borderRadius: 2, px: 1 }}>
+                                          <BookmarkBorderIcon sx={{ fontSize: 15 }} />
+                                        </IconButton>
+                                      </Tooltip>
+                                    )}
+                                  </Box>
+                                </Card>
+                              </Grid>
+                            );
+                          })}
+                        </Grid>
+                      </Box>
+                    ))}
+                  </Box>
                 )}
               </Box>
             </Box>
-
-            <Box p={4} maxWidth={960} mx="auto">
-              {recipeHistory.length === 0 ? (
-                <Box textAlign="center" py={12}>
-                  <Typography fontSize="3rem" mb={2}>🍳</Typography>
-                  <Typography fontWeight={700} color="#6b7280" fontSize="1rem" mb={1}>No history yet</Typography>
-                  <Typography variant="body2" color="#4b5563" mb={3}>Open any recipe and it will be tracked here automatically</Typography>
-                  <Button variant="contained" onClick={() => setPage("recipes")}
-                    sx={{ background: "linear-gradient(135deg, #5a7c4a, #4a6a3a)", borderRadius: 2, fontWeight: 700 }}>
-                    Generate Recipes →
-                  </Button>
-                </Box>
-              ) : (
-                <Grid container spacing={2}>
-                  {recipeHistory.map((item, i) => {
-                    const timeAgo = (() => {
-                      const diff = Date.now() - new Date(item.viewedAt).getTime();
-                      const mins = Math.floor(diff / 60000);
-                      if (mins < 1) return "just now";
-                      if (mins < 60) return `${mins}m ago`;
-                      const hrs = Math.floor(mins / 60);
-                      if (hrs < 24) return `${hrs}h ago`;
-                      return `${Math.floor(hrs / 24)}d ago`;
-                    })();
-                    const isSaved = savedRecipes.some(r => r._title === item.title);
-                    return (
-                      <Grid item xs={12} sm={6} md={4} key={i}>
-                        <Card sx={{ borderRadius: 3, overflow: "hidden", border: "1px solid rgba(255,255,255,0.07)", background: "rgba(255,255,255,0.04)", cursor: "pointer", transition: "all 0.2s", "&:hover": { background: "rgba(184,113,78,0.1)", borderColor: "rgba(184,113,78,0.3)", transform: "translateY(-3px)" } }}
-                          onClick={() => fetchDetails(item.title)}>
-                          <Box sx={{ position: "relative", height: 140, overflow: "hidden" }}>
-                            <RecipeImage title={item.title} height={140} />
-                            <Box sx={{ position: "absolute", top: 8, right: 8, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)", borderRadius: "8px", px: 1, py: 0.3 }}>
-                              <Typography sx={{ color: "rgba(255,255,255,0.7)", fontSize: "0.65rem", fontWeight: 600 }}>#{i + 1}</Typography>
-                            </Box>
-                            {isSaved && (
-                              <Box sx={{ position: "absolute", top: 8, left: 8, background: "rgba(34,197,94,0.85)", borderRadius: "8px", px: 1, py: 0.3 }}>
-                                <Typography sx={{ color: "#fff", fontSize: "0.62rem", fontWeight: 800 }}>💾 SAVED</Typography>
-                              </Box>
-                            )}
-                          </Box>
-                          <Box p={2}>
-                            <Typography fontWeight={700} color="#fff" fontSize="0.9rem" mb={0.3} sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.title}</Typography>
-                            <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.35)" }}>Viewed {timeAgo}</Typography>
-                          </Box>
-                          <Box px={2} pb={2} display="flex" gap={1}>
-                            <Button size="small" variant="outlined" fullWidth
-                              onClick={e => { e.stopPropagation(); fetchDetails(item.title); }}
-                              sx={{ borderColor: "rgba(184,113,78,0.4)", color: "#b8714e", borderRadius: 2, fontSize: "0.75rem", fontWeight: 700 }}>
-                              View Recipe
-                            </Button>
-                            {!isSaved && (
-                              <Tooltip title="Save to cookbook">
-                                <IconButton size="small"
-                                  onClick={e => { e.stopPropagation(); fetchDetails(item.title); setTimeout(() => saveRecipe(), 800); }}
-                                  sx={{ color: "#6b7280", "&:hover": { color: "#22c55e" }, border: "1px solid rgba(255,255,255,0.1)", borderRadius: 2 }}>
-                                  <BookmarkBorderIcon sx={{ fontSize: 16 }} />
-                                </IconButton>
-                              </Tooltip>
-                            )}
-                          </Box>
-                        </Card>
-                      </Grid>
-                    );
-                  })}
-                </Grid>
-              )}
-            </Box>
-          </Box>
-        )}
+          );
+        })()}
 
         {/* ── RECIPE DETAILS MODAL ── */}
         <Dialog open={open} onClose={() => { setOpen(false); setDetails(null); window.speechSynthesis?.cancel(); }}
