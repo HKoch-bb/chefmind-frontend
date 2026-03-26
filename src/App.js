@@ -682,7 +682,8 @@ const SectionHeader = ({ icon, title, subtitle, accent }) => (
 const imageMemCache = {};
 
 const RecipeImage = ({ title, height = 160 }) => {
-  const API = "http://localhost:5000";
+ // const API = "http://localhost:5000";
+  const API = process.env.REACT_APP_API_URL || "http://localhost:5000";
   const [src, setSrc] = useState(null);
   const [imgLoading, setImgLoading] = useState(true);
 
@@ -1325,7 +1326,8 @@ const SubstitutionModal = ({ open, ingredient, recipeName, onClose }) => {
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState([]);
   const [error, setError] = useState(null);
-  const API = "http://localhost:5000";
+//  const API = "http://localhost:5000";
+const API = process.env.REACT_APP_API_URL || "http://localhost:5000";
 
   useEffect(() => {
     if (!open || !ingredient) return;
@@ -1375,7 +1377,8 @@ const NutritionDashboard = ({ plan }) => {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
   const [open, setOpen] = useState(false);
-  const API = "http://localhost:5000";
+ // const API = "http://localhost:5000";
+const API = process.env.REACT_APP_API_URL || "http://localhost:5000";
 
   const mealNames = React.useMemo(() => {
     if (!plan) return [];
@@ -2162,8 +2165,9 @@ const LowStockNotificationPanel = ({ open, onClose, lowStockItems, onAddToGrocer
 
 // ─── Main App ─────────────────────────────────────────────────────────────────
 export default function App() {
-  const API = "http://localhost:5000";
-  const [page, setPage] = useState("home");
+ // const API = "http://localhost:5000";
+ const API = process.env.REACT_APP_API_URL || "http://localhost:5000"; 
+ const [page, setPage] = useState("home");
 
   // ── Toast system ──
   const [toasts, setToasts] = useState([]);
